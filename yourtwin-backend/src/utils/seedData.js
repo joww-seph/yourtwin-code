@@ -19,10 +19,13 @@ const seedData = async () => {
     
     // Create instructor
     const instructor = await User.create({
-      name: 'Prof. Juan Dela Cruz',
+      firstName: 'John',
+      lastName: 'Doe',
+      middleName: 'Smith',
       email: 'instructor@mmsu.edu.ph',
       password: 'instructor123',
       role: 'instructor',
+      employeeId: 'EMP-2024-001',
       department: 'CCIS'
     });
     
@@ -31,43 +34,51 @@ const seedData = async () => {
     // Create students
     const students = await User.create([
       {
-        name: 'Marc Joseph Sacopaso',
+        firstName: 'Marc Joseph',
+        lastName: 'Sacopaso',
+        middleName: 'Dela Cruz',
         email: 'marc@mmsu.edu.ph',
         password: 'student123',
         role: 'student',
         studentId: '2021-12345',
         course: 'BSIT',
-        section: 'B',
+        section: '3A',
         yearLevel: 3
       },
       {
-        name: 'Kurt Angelo Agcaoili',
+        firstName: 'Kurt',
+        lastName: 'Agcaoili',
+        middleName: 'Santos',
         email: 'kurt@mmsu.edu.ph',
         password: 'student123',
         role: 'student',
         studentId: '2021-12346',
         course: 'BSIT',
-        section: 'B',
+        section: '3A',
         yearLevel: 3
       },
       {
-        name: 'Angelo Laurence Palting',
+        firstName: 'Angelo',
+        lastName: 'Palting',
+        middleName: 'Reyes',
         email: 'angelo@mmsu.edu.ph',
         password: 'student123',
         role: 'student',
         studentId: '2021-12347',
         course: 'BSIT',
-        section: 'B',
-        yearLevel: 2
+        section: '3A',
+        yearLevel: 3
       },
       {
-        name: 'Meljan Christoffer Crisostomo',
+        firstName: 'Meljan',
+        lastName: 'Crisostomo',
+        middleName: 'Garcia',
         email: 'meljan@mmsu.edu.ph',
         password: 'student123',
         role: 'student',
         studentId: '2021-12348',
         course: 'BSIT',
-        section: 'B',
+        section: '3A',
         yearLevel: 3
       }
     ]);
@@ -107,7 +118,7 @@ const seedData = async () => {
         testCases: [
           {
             input: '',
-            expectedOutput: '10 20 30 40 50',
+            expectedOutput: '10 20 30 40 50 ',
             isHidden: false,
             points: 10
           }
@@ -175,10 +186,10 @@ const seedData = async () => {
     console.log('🎉 Database seeded successfully!');
     console.log('\n📋 Login Credentials:');
     console.log('Instructor: instructor@mmsu.edu.ph / instructor123');
-    console.log('Student: marc@mmsu.edu.ph / student123');
-    console.log('Student: kurt@mmsu.edu.ph / student123');
-    console.log('Student: angelo@mmsu.edu.ph / student123');
-    console.log('Student: meljan@mmsu.edu.ph / student123');
+    console.log('Student: marc@mmsu.edu.ph / student123 (Student ID: 2021-12345)');
+    console.log('Student: kurt@mmsu.edu.ph / student123 (Student ID: 2021-12346)');
+    console.log('Student: angelo@mmsu.edu.ph / student123 (Student ID: 2021-12347)');
+    console.log('Student: meljan@mmsu.edu.ph / student123 (Student ID: 2021-12348)');
     
     process.exit(0);
   } catch (error) {

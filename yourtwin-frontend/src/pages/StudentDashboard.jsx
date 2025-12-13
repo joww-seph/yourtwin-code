@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { activityAPI } from '../services/api';
-import { Code, CheckCircle, Clock, TrendingUp, LogOut } from 'lucide-react';
+import { activityAPI, submissionAPI } from '../services/api';
+import { Code, CheckCircle, Clock, TrendingUp, LogOut, User } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 
 function StudentDashboard() {
   const { user, logout } = useAuth();
@@ -59,11 +60,27 @@ function StudentDashboard() {
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <p className="font-medium text-[#cdd6f4]">{user?.name}</p>
+                <p className="font-medium text-[#cdd6f4]">
+                  {user?.displayName || `${user?.firstName} ${user?.lastName}`}
+                </p>
                 <p className="text-sm text-[#bac2de]">
                   {user?.course} {user?.yearLevel}-{user?.section}
                 </p>
               </div>
+              <button
+                onClick={() => navigate('/student/profile')}
+                className="p-2 hover:bg-[#45475a] rounded-lg transition"
+                title="Edit Profile"
+              >
+                <User className="w-5 h-5 text-[#bac2de]" />
+              </button>
+              <button
+                onClick={() => navigate('/student/progress')}
+                className="p-2 hover:bg-[#45475a] rounded-lg transition"
+                title="My Progress"
+              >
+                <BarChart3 className="w-5 h-5 text-[#bac2de]" />
+              </button>
               <button
                 onClick={handleLogout}
                 className="p-2 hover:bg-[#45475a] rounded-lg transition"
@@ -80,7 +97,9 @@ function StudentDashboard() {
       <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
         {/* Welcome Section */}
         <div className="bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] rounded-lg shadow-lg p-6 text-[#1e1e2e] mb-8">
-          <h2 className="text-3xl font-bold mb-2">Welcome back, {user?.name?.split(' ')[0]}! 👋</h2>
+          <h2 className="text-3xl font-bold mb-2">
+            Welcome back, {user?.firstName || user?.name?.split(' ')[0]}! 👋
+          </h2>
           <p className="text-[#11111b]">Ready to continue your coding journey?</p>
         </div>
 
@@ -106,17 +125,7 @@ function StudentDashboard() {
           />
         </div>
 
-        {/* Competency Progress
-        <div className="bg-[#313244] rounded-lg shadow-lg border border-[#45475a] p-6 mb-8">
-          <h3 className="text-xl font-bold text-[#cdd6f4] mb-4">Your Progress</h3>
-          <div className="space-y-4">
-            <CompetencyBar topic="Arrays" level={0.68} />
-            <CompetencyBar topic="Loops" level={0.65} />
-            <CompetencyBar topic="Functions" level={0.45} />
-          </div>
-        </div> */}
-
-        {/* Today's Activities */}
+        {/* Available Activities */}
         <div className="bg-[#313244] rounded-lg shadow-lg border border-[#45475a] p-6">
           <h3 className="text-xl font-bold text-[#cdd6f4] mb-4">Available Activities</h3>
           {activities.length === 0 ? (
@@ -156,30 +165,27 @@ function StatCard({ icon, title, value, color }) {
   );
 }
 
-function CompetencyBar({ topic, level }) {
-  const percentage = Math.round(level * 100);
-  const color = level >= 0.7 ? 'bg-[#a6e3a1]' : level >= 0.4 ? 'bg-[#f9e2af]' : 'bg-[#f38ba8]';
-
-  return (
-    <div>
-      <div className="flex justify-between mb-1">
-        <span className="font-medium text-[#cdd6f4]">{topic}</span>
-        <span className="text-[#bac2de]">{percentage}%</span>
-      </div>
-      <div className="w-full bg-[#45475a] rounded-full h-3">
-        <div 
-          className={`${color} h-3 rounded-full transition-all duration-500`}
-          style={{ width: `${percentage}%` }}
-        ></div>
-      </div>
-    </div>
-  );
-}
-
 function ActivityCard({ activity }) {
   const navigate = useNavigate();
+  const [submissionStatus, setSubmissionStatus] = useState(null);
 
-   const handleStart = () => {
+  useEffect(() => {
+    // Fetch submission status for this activity
+    const fetchStatus = async () => {
+      try {
+        const response = await submissionAPI.getMySubmissions(activity._id);
+        if (response.data.stats) {
+          setSubmissionStatus(response.data.stats);
+        }
+      } catch (error) {
+        // Silent fail - not critical
+        console.debug('No submission stats yet');
+      }
+    };
+    fetchStatus();
+  }, [activity._id]);
+
+  const handleStart = () => {
     navigate(`/student/activity/${activity._id}`);
   };
 
@@ -195,31 +201,53 @@ function ActivityCard({ activity }) {
   };
 
   return (
-    <div className="border border-[#45475a] bg-[#181825] rounded-lg p-4 flex items-center justify-between hover:shadow-md hover:border-[#89b4fa] transition">
-      <div className="flex items-start gap-3 flex-1">
-        <Code className="w-5 h-5 text-[#89b4fa] mt-1" />
-        <div className="flex-1">
-          <p className="font-medium text-[#cdd6f4] mb-1">{activity.title}</p>
-          <p className="text-sm text-[#bac2de] mb-2 line-clamp-2">{activity.description}</p>
-          <div className="flex flex-wrap gap-2">
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${typeStyles[activity.type]}`}>
-              {activity.type}
-            </span>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${difficultyStyles[activity.difficulty]}`}>
-              {activity.difficulty}
-            </span>
-            <span className="px-2 py-1 rounded-full text-xs font-medium bg-[#6c7086] bg-opacity-20 text-[#bac2de]">
-              {activity.language.toUpperCase()}
-            </span>
-            <span className="px-2 py-1 rounded-full text-xs font-medium bg-[#cba6f7] bg-opacity-20 text-[#cba6f7]">
-              {activity.topic}
-            </span>
+    <div className="border border-[#45475a] bg-[#181825] rounded-lg p-4 hover:shadow-md hover:border-[#89b4fa] transition">
+      <div className="flex items-start justify-between">
+        <div className="flex items-start gap-3 flex-1">
+          <Code className="w-5 h-5 text-[#89b4fa] mt-1" />
+          <div className="flex-1">
+            <h4 className="font-medium text-[#cdd6f4] mb-1">{activity.title}</h4>
+            <p className="text-sm text-[#bac2de] mb-2 line-clamp-2">
+              {activity.description}
+            </p>
+            <div className="flex flex-wrap gap-2 mb-2">
+              <span className={`px-2 py-1 rounded text-xs font-medium ${typeStyles[activity.type]}`}>
+                {activity.type}
+              </span>
+              <span className={`px-2 py-1 rounded text-xs font-medium ${difficultyStyles[activity.difficulty]}`}>
+                {activity.difficulty}
+              </span>
+              <span className="px-2 py-1 rounded text-xs font-medium bg-[#6c7086] bg-opacity-20 text-[#bac2de]">
+                {activity.language.toUpperCase()}
+              </span>
+              <span className="px-2 py-1 rounded text-xs font-medium bg-[#cba6f7] bg-opacity-20 text-[#cba6f7]">
+                {activity.topic}
+              </span>
+            </div>
+            
+            {/* Submission Status */}
+            {submissionStatus && (
+              <div className="flex items-center gap-3 text-xs text-[#6c7086]">
+                <span>Best: {submissionStatus.bestScore}%</span>
+                <span>•</span>
+                <span>Attempts: {submissionStatus.totalAttempts}</span>
+                {submissionStatus.passed && (
+                  <>
+                    <span>•</span>
+                    <span className="text-[#a6e3a1]">✓ Completed</span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
+        <button 
+          onClick={handleStart}
+          className="px-4 py-2 bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] text-[#1e1e2e] rounded-lg hover:opacity-90 transition text-sm font-medium"
+        >
+          {submissionStatus?.passed ? 'Review' : 'Start'}
+        </button>
       </div>
-      <button onClick={handleStart} className="px-4 py-2 bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] text-[#1e1e2e] rounded-lg hover:opacity-90 transition text-sm font-medium">
-        Start
-      </button>
     </div>
   );
 }

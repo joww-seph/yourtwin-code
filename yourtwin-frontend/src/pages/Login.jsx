@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { AlertCircle } from 'lucide-react';
 
 function Login() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('student');
   const [error, setError] = useState('');
@@ -19,7 +19,7 @@ function Login() {
     setLoading(true);
 
     try {
-      const result = await login(email, password);
+      const result = await login(identifier, password);
       
       if (result.success) {
         // Redirect based on user role
@@ -85,16 +85,16 @@ function Login() {
           {/* Email Input */}
           <div>
             <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
-              Email
+              ID / Email
             </label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
               required
               disabled={loading}
-              className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50 disabled:cursor-not-allowed"
-              placeholder="student@mmsu.edu.ph"
+              className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
+              placeholder={role === 'student' ? "Student ID or Email" : "Email"}
             />
           </div>
 

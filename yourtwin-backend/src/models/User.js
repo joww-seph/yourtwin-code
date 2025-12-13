@@ -3,9 +3,19 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const userSchema = new mongoose.Schema({
-  name: {
+  // Separate name fields (LFM format)
+  firstName: {
     type: String,
-    required: [true, 'Name is required'],
+    required: [true, 'First name is required'],
+    trim: true
+  },
+  lastName: {
+    type: String,
+    required: [true, 'Last name is required'],
+    trim: true
+  },
+  middleName: {
+    type: String,
     trim: true
   },
   email: {
@@ -27,43 +37,72 @@ const userSchema = new mongoose.Schema({
     enum: ['student', 'instructor', 'admin'],
     default: 'student'
   },
+  // Student-specific fields
   studentId: {
     type: String,
-    sparse: true
+    unique: true,
+    sparse: true // Only required for students
   },
   course: {
     type: String,
     enum: ['BSIT', 'BSCS'],
     uppercase: true
   },
-  yearLevel: {
-    type: Number,
-    min: 1,
-    max: 4
-  },
   section: {
     type: String,
     uppercase: true,
     trim: true
   },
+  yearLevel: {
+    type: Number,
+    min: 1,
+    max: 4
+  },
+  // Instructor-specific fields
   department: {
     type: String,
     default: 'CCIS'
   },
+  employeeId: {
+    type: String,
+    unique: true,
+    sparse: true // Only for instructors
+  },
+  // Common fields
   isActive: {
     type: Boolean,
     default: true
   },
   lastLogin: {
     type: Date
+  },
+  profileImage: {
+    type: String,
+    default: null
   }
 }, {
   timestamps: true
 });
 
-// Hash password before saving - NO next() needed for async middleware
+// Virtual for full name
+userSchema.virtual('fullName').get(function() {
+  if (this.middleName) {
+    return `${this.lastName}, ${this.firstName} ${this.middleName.charAt(0)}.`;
+  }
+  return `${this.lastName}, ${this.firstName}`;
+});
+
+// Virtual for display name (First Last)
+userSchema.virtual('displayName').get(function() {
+  return `${this.firstName} ${this.lastName}`;
+});
+
+// Ensure virtuals are included in JSON
+userSchema.set('toJSON', { virtuals: true });
+userSchema.set('toObject', { virtuals: true });
+
+// Hash password before saving
 userSchema.pre('save', async function() {
-  // Only hash if password is modified
   if (!this.isModified('password')) {
     return;
   }
@@ -83,7 +122,8 @@ userSchema.methods.generateAuthToken = function() {
     { 
       userId: this._id, 
       email: this.email, 
-      role: this.role 
+      role: this.role,
+      studentId: this.studentId 
     },
     process.env.JWT_SECRET,
     { expiresIn: '24h' }

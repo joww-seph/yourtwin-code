@@ -55,8 +55,10 @@ export const activityAPI = {
 // Submission API calls (we'll add the backend route later)
 export const submissionAPI = {
   submit: (data) => api.post('/submissions', data),
-  getMySubmissions: (activityId) => api.get(`/submissions/my/${activityId}`),
-  getAll: () => api.get('/submissions/my')
+  getMySubmissions: (activityId) => api.get(`/submissions/activity/${activityId}`),
+  getAll: () => api.get('/submissions/my'),
+  getOne: (id) => api.get(`/submissions/${id}`),
+  compare: (id1, id2) => api.get(`/submissions/compare/${id1}/${id2}`)
 };
 
 export default api;

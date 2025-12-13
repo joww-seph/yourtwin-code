@@ -8,28 +8,32 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('token'));
 
+  // Load user function (can be called externally)
+  const loadUser = async () => {
+    if (token) {
+      try {
+        const response = await authAPI.getMe();
+        setUser(response.data.data.user);
+      } catch (error) {
+        console.error('Failed to load user:', error);
+        localStorage.removeItem('token');
+        setToken(null);
+      }
+    }
+  };
+
   // Load user on mount if token exists
   useEffect(() => {
-    const loadUser = async () => {
-      if (token) {
-        try {
-          const response = await authAPI.getMe();
-          setUser(response.data.data.user);
-        } catch (error) {
-          console.error('Failed to load user:', error);
-          localStorage.removeItem('token');
-          setToken(null);
-        }
-      }
+    const initAuth = async () => {
+      await loadUser();
       setLoading(false);
     };
-
-    loadUser();
+    initAuth();
   }, [token]);
 
-  const login = async (email, password) => {
+  const login = async (identifier, password) => {
     try {
-      const response = await authAPI.login({ email, password });
+      const response = await authAPI.login({ identifier, password });
       const { user: userData, token: authToken } = response.data.data;
       
       // Save to localStorage
@@ -87,6 +91,7 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
+    loadUser,
     isAuthenticated: !!user,
     isStudent: user?.role === 'student',
     isInstructor: user?.role === 'instructor'

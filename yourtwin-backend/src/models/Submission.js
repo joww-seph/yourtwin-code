@@ -28,8 +28,12 @@ const submissionSchema = new mongoose.Schema({
     testCaseId: mongoose.Schema.Types.ObjectId,
     passed: Boolean,
     actualOutput: String,
+    expectedOutput: String,
     executionTime: Number,
-    memory: Number
+    memory: Number,
+    status: String,
+    stderr: String,
+    compileOutput: String
   }],
   score: {
     type: Number,
@@ -38,14 +42,14 @@ const submissionSchema = new mongoose.Schema({
     default: 0
   },
   executionTime: {
-    type: Number // in milliseconds
+    type: Number // Total execution time in seconds
   },
   aiRequestsCount: {
     type: Number,
     default: 0
   },
   timeSpent: {
-    type: Number, // in seconds
+    type: Number, // Time spent coding in seconds
     default: 0
   },
   attemptNumber: {
@@ -55,6 +59,17 @@ const submissionSchema = new mongoose.Schema({
   isLockdownMode: {
     type: Boolean,
     default: false
+  },
+  // NEW FIELDS
+  isBestScore: {
+    type: Boolean,
+    default: false
+  },
+  compileError: {
+    type: String
+  },
+  runtimeError: {
+    type: String
   }
 }, {
   timestamps: true
@@ -63,6 +78,27 @@ const submissionSchema = new mongoose.Schema({
 // Index for faster queries
 submissionSchema.index({ student: 1, activity: 1 });
 submissionSchema.index({ student: 1, createdAt: -1 });
+submissionSchema.index({ activity: 1, createdAt: -1 });
+
+// Method to mark as best score
+submissionSchema.statics.updateBestScore = async function(studentId, activityId) {
+  // Reset all previous best scores
+  await this.updateMany(
+    { student: studentId, activity: activityId },
+    { isBestScore: false }
+  );
+  
+  // Find and mark the submission with highest score
+  const bestSubmission = await this.findOne({
+    student: studentId,
+    activity: activityId
+  }).sort({ score: -1, createdAt: 1 });
+  
+  if (bestSubmission) {
+    bestSubmission.isBestScore = true;
+    await bestSubmission.save();
+  }
+};
 
 const Submission = mongoose.model('Submission', submissionSchema);
 

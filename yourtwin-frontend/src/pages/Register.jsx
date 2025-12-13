@@ -5,7 +5,9 @@ import { AlertCircle } from 'lucide-react';
 
 function Register() {
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
+    middleName: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -123,20 +125,48 @@ function Register() {
           </div>
 
           {/* Basic Info */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
-                Full Name *
+                Last Name *
               </label>
               <input
                 type="text"
-                name="name"
-                value={formData.name}
+                name="lastName"
+                value={formData.lastName}
                 onChange={handleChange}
                 required
-                disabled={loading}
-                className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50 disabled:cursor-not-allowed"
-                placeholder="Juan Dela Cruz"
+                className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086]"
+                placeholder="Dela Cruz"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
+                First Name *
+              </label>
+              <input
+                type="text"
+                name="firstName"
+                value={formData.firstName}
+                onChange={handleChange}
+                required
+                className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086]"
+                placeholder="Juan"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
+                Middle Name
+              </label>
+              <input
+                type="text"
+                name="middleName"
+                value={formData.middleName}
+                onChange={handleChange}
+                className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086]"
+                placeholder="Santos"
               />
             </div>
 

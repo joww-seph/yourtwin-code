@@ -12,6 +12,7 @@ import {
   Terminal,
   FileText
 } from 'lucide-react';
+import SubmissionHistory from '../components/SubmissionHistory';
 
 function ActivityPage() {
   const { activityId } = useParams();
@@ -23,6 +24,8 @@ function ActivityPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState(null);
   const [activeTab, setActiveTab] = useState('problem');
+  const [viewingSubmission, setViewingSubmission] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     fetchActivity();
@@ -69,6 +72,23 @@ function ActivityPage() {
     } finally {
       setIsRunning(false);
     }
+  };
+
+  const getDisplayName = (user) => {
+    if (!user) return '';
+
+    // Preferred explicit display name
+    if (user.displayName) return user.displayName;
+
+    // First + Last
+    if (user.firstName || user.lastName) {
+      return `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    }
+
+    // Legacy fallback
+    if (user.name) return user.name;
+
+    return 'Student';
   };
 
   if (loading) {
@@ -125,7 +145,7 @@ function ActivityPage() {
             </div>
           </div>
           <div className="text-right">
-            <p className="text-sm text-[#bac2de]">{user?.name}</p>
+            <p className="text-sm text-[#bac2de]">{getDisplayName(user)}</p>
             <p className="text-xs text-[#6c7086]">
               {user?.course} {user?.yearLevel}-{user?.section}
             </p>
@@ -161,11 +181,30 @@ function ActivityPage() {
               <Terminal className="w-4 h-4 inline mr-2" />
               Results
             </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`px-4 py-2 text-sm font-medium transition ${
+                activeTab === 'history'
+                  ? 'text-[#89b4fa] border-b-2 border-[#89b4fa]'
+                  : 'text-[#bac2de] hover:text-[#cdd6f4]'
+              }`}
+            >
+              <Clock className="w-4 h-4 inline mr-2" />
+              History
+            </button>
           </div>
 
           {/* Tab Content */}
           <div className="flex-1 overflow-y-auto p-6">
-            {activeTab === 'problem' ? (
+            {activeTab === 'history' ? (
+              <SubmissionHistory 
+                activityId={activityId}
+                onViewCode={(submission) => {
+                  setViewingSubmission(submission);
+                  // Optionally load the code into editor
+                }}
+              />
+            ) : activeTab === 'problem' ? (
               <ProblemTab activity={activity} />
             ) : (
               <ResultsTab results={results} isRunning={isRunning} />

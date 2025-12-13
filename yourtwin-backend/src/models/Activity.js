@@ -20,6 +20,14 @@ const testCaseSchema = new mongoose.Schema({
 });
 
 const activitySchema = new mongoose.Schema({
+  labSession: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'LabSession'
+  },
+  orderInSession: {
+    type: Number,
+    default: 1 // Order within the lab session
+  },
   title: {
     type: String,
     required: true,

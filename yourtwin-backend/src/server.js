@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import connectDB from './config/database.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import labSessionRoutes from './routes/labSessionRoutes.js';
 
 // Import routes
 import authRoutes from './routes/authRoutes.js';
@@ -58,6 +59,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/submissions', submissionRoutes);
+app.use('/api/lab-sessions', labSessionRoutes);
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
