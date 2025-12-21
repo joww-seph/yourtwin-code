@@ -9,9 +9,15 @@ function Login() {
   const [role, setRole] = useState('student');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  
+
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
+
+  // Clear error when role changes
+  const handleRoleChange = (newRole) => {
+    setRole(newRole);
+    setError('');
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -20,8 +26,17 @@ function Login() {
 
     try {
       const result = await login(identifier, password);
-      
+
       if (result.success) {
+        // Validate that the logged-in user's role matches the selected role
+        if (result.user.role !== role) {
+          // Logout to clear the token since role doesn't match
+          logout();
+          setError(`This account is registered as a ${result.user.role}. Please select the correct role and try again.`);
+          setLoading(false);
+          return;
+        }
+
         // Redirect based on user role
         if (result.user.role === 'student') {
           navigate('/student/dashboard');
@@ -58,7 +73,7 @@ function Login() {
           <div className="flex gap-4">
             <button
               type="button"
-              onClick={() => setRole('student')}
+              onClick={() => handleRoleChange('student')}
               disabled={loading}
               className={`flex-1 py-2 px-4 rounded-lg font-medium transition ${
                 role === 'student'
@@ -70,7 +85,7 @@ function Login() {
             </button>
             <button
               type="button"
-              onClick={() => setRole('instructor')}
+              onClick={() => handleRoleChange('instructor')}
               disabled={loading}
               className={`flex-1 py-2 px-4 rounded-lg font-medium transition ${
                 role === 'instructor'
@@ -85,7 +100,7 @@ function Login() {
           {/* Email Input */}
           <div>
             <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
-              ID / Email
+              {role === 'student' ? 'Student ID or Email' : 'Employee ID or Email'}
             </label>
             <input
               type="text"
@@ -94,7 +109,7 @@ function Login() {
               required
               disabled={loading}
               className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
-              placeholder={role === 'student' ? "Student ID or Email" : "Email"}
+              placeholder={role === 'student' ? "Enter your Student ID or Email" : "Enter your Employee ID or Email"}
             />
           </div>
 

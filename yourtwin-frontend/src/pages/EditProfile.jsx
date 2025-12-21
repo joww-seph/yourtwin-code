@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import axios from 'axios';
+import { authAPI } from '../services/api';
 import { ArrowLeft, User, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 
 function EditProfile() {
@@ -12,7 +12,8 @@ function EditProfile() {
     firstName: '',
     lastName: '',
     middleName: '',
-    password: '',
+    currentPassword: '',
+    newPassword: '',
     confirmPassword: ''
   });
   
@@ -26,7 +27,8 @@ function EditProfile() {
         firstName: user.firstName || '',
         lastName: user.lastName || '',
         middleName: user.middleName || '',
-        password: '',
+        currentPassword: '',
+        newPassword: '',
         confirmPassword: ''
       });
     }
@@ -45,12 +47,16 @@ function EditProfile() {
     setSuccess('');
 
     // Validate passwords if changing
-    if (formData.password || formData.confirmPassword) {
-      if (formData.password !== formData.confirmPassword) {
+    if (formData.newPassword || formData.confirmPassword) {
+      if (!formData.currentPassword) {
+        setError('Current password is required to change password');
+        return;
+      }
+      if (formData.newPassword !== formData.confirmPassword) {
         setError('Passwords do not match');
         return;
       }
-      if (formData.password.length < 6) {
+      if (formData.newPassword.length < 6) {
         setError('Password must be at least 6 characters');
         return;
       }
@@ -66,26 +72,19 @@ function EditProfile() {
       };
 
       // Only include password if provided
-      if (formData.password) {
-        updateData.password = formData.password;
+      if (formData.newPassword) {
+        updateData.password = formData.newPassword;
       }
 
-      const response = await axios.put(
-        'http://localhost:5000/api/auth/profile',
-        updateData,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
+      const response = await authAPI.updateProfile(updateData);
 
       if (response.data.success) {
         setSuccess('Profile updated successfully!');
         // Clear password fields
         setFormData({
           ...formData,
-          password: '',
+          currentPassword: '',
+          newPassword: '',
           confirmPassword: ''
         });
         // Reload user data
@@ -202,12 +201,27 @@ function EditProfile() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
+                    Current Password
+                  </label>
+                  <input
+                    type="password"
+                    name="currentPassword"
+                    value={formData.currentPassword}
+                    onChange={handleChange}
+                    disabled={loading}
+                    className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
+                    placeholder="••••••••"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
                     New Password
                   </label>
                   <input
                     type="password"
-                    name="password"
-                    value={formData.password}
+                    name="newPassword"
+                    value={formData.newPassword}
                     onChange={handleChange}
                     disabled={loading}
                     minLength={6}

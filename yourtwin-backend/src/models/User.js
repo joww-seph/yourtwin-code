@@ -2,22 +2,12 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
+/**
+ * User Model - Base Identity Only (BCNF Compliant)
+ * Contains only authentication and identity fields.
+ * Role-specific data lives in Student/Instructor models.
+ */
 const userSchema = new mongoose.Schema({
-  // Separate name fields (LFM format)
-  firstName: {
-    type: String,
-    required: [true, 'First name is required'],
-    trim: true
-  },
-  lastName: {
-    type: String,
-    required: [true, 'Last name is required'],
-    trim: true
-  },
-  middleName: {
-    type: String,
-    trim: true
-  },
   email: {
     type: String,
     required: [true, 'Email is required'],
@@ -32,43 +22,25 @@ const userSchema = new mongoose.Schema({
     minlength: [6, 'Password must be at least 6 characters'],
     select: false
   },
+  firstName: {
+    type: String,
+    required: [true, 'First name is required'],
+    trim: true
+  },
+  lastName: {
+    type: String,
+    required: [true, 'Last name is required'],
+    trim: true
+  },
+  middleName: {
+    type: String,
+    trim: true
+  },
   role: {
     type: String,
     enum: ['student', 'instructor', 'admin'],
-    default: 'student'
+    required: true
   },
-  // Student-specific fields
-  studentId: {
-    type: String,
-    unique: true,
-    sparse: true // Only required for students
-  },
-  course: {
-    type: String,
-    enum: ['BSIT', 'BSCS'],
-    uppercase: true
-  },
-  section: {
-    type: String,
-    uppercase: true,
-    trim: true
-  },
-  yearLevel: {
-    type: Number,
-    min: 1,
-    max: 4
-  },
-  // Instructor-specific fields
-  department: {
-    type: String,
-    default: 'CCIS'
-  },
-  employeeId: {
-    type: String,
-    unique: true,
-    sparse: true // Only for instructors
-  },
-  // Common fields
   isActive: {
     type: Boolean,
     default: true
@@ -84,7 +56,7 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Virtual for full name
+// Virtual for full name (LFM format)
 userSchema.virtual('fullName').get(function() {
   if (this.middleName) {
     return `${this.lastName}, ${this.firstName} ${this.middleName.charAt(0)}.`;
@@ -106,7 +78,7 @@ userSchema.pre('save', async function() {
   if (!this.isModified('password')) {
     return;
   }
-  
+
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });
@@ -119,16 +91,18 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
 // Method to generate JWT token
 userSchema.methods.generateAuthToken = function() {
   return jwt.sign(
-    { 
-      userId: this._id, 
-      email: this.email, 
-      role: this.role,
-      studentId: this.studentId 
+    {
+      userId: this._id,
+      email: this.email,
+      role: this.role
     },
     process.env.JWT_SECRET,
     { expiresIn: '24h' }
   );
 };
+
+// Indexes (email already has unique: true which creates an index)
+userSchema.index({ role: 1 });
 
 const User = mongoose.model('User', userSchema);
 

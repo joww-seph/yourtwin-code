@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { SocketProvider } from './contexts/SocketContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 import Login from './pages/Login';
@@ -10,16 +11,21 @@ import StudentDashboard from './pages/StudentDashboard';
 import ActivityPage from './pages/ActivityPage';
 import MyProgress from './pages/MyProgress';
 import EditProfile from './pages/EditProfile';
+import StudentSessionActivities from './pages/StudentSessionActivities';
+import SandboxPage from './pages/SandboxPage';
 
 // Instructor pages
 import InstructorDashboard from './pages/InstructorDashboard';
 import LabSessionsPage from './pages/LabSessionsPage';
+import LabSessionDetailPage from './pages/LabSessionDetailPage';
+import CreateEditLabSession from './pages/CreateEditLabSession';
 
 function App() {
   return (
     <AuthProvider>
-      <Router>
-        <Routes>
+      <SocketProvider>
+        <Router>
+          <Routes>
 
           {/* ---------- Public ---------- */}
           <Route path="/" element={<Navigate to="/login" replace />} />
@@ -72,6 +78,24 @@ function App() {
             }
           />
 
+          <Route
+            path="/student/session/:sessionId"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <StudentSessionActivities />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/student/sandbox"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <SandboxPage />
+              </ProtectedRoute>
+            }
+          />
+
           {/* ---------- Instructor Routes ---------- */}
           <Route
             path="/instructor/dashboard"
@@ -100,30 +124,29 @@ function App() {
             }
           />
 
-          {/* Placeholder routes (Phase 1.5 / Phase 2) */}
           <Route
             path="/instructor/lab-sessions/create"
             element={
               <ProtectedRoute allowedRoles={['instructor']}>
-                <div className="p-8 text-[#cdd6f4]">Create Lab Session (Coming Next)</div>
+                <CreateEditLabSession />
               </ProtectedRoute>
             }
           />
 
           <Route
-            path="/instructor/lab-sessions/:id/edit"
+            path="/instructor/lab-sessions/:sessionId/edit"
             element={
               <ProtectedRoute allowedRoles={['instructor']}>
-                <div className="p-8 text-[#cdd6f4]">Edit Lab Session (Coming Next)</div>
+                <CreateEditLabSession />
               </ProtectedRoute>
             }
           />
 
           <Route
-            path="/instructor/lab-sessions/:id"
+            path="/instructor/lab-sessions/:sessionId"
             element={
               <ProtectedRoute allowedRoles={['instructor']}>
-                <div className="p-8 text-[#cdd6f4]">Lab Session Details (Coming Next)</div>
+                <LabSessionDetailPage />
               </ProtectedRoute>
             }
           />
@@ -164,7 +187,8 @@ function App() {
           />
 
         </Routes>
-      </Router>
+        </Router>
+      </SocketProvider>
     </AuthProvider>
   );
 }

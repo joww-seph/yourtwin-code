@@ -1,52 +1,71 @@
 import mongoose from 'mongoose';
 
-const competencySchema = new mongoose.Schema({
-  topic: {
-    type: String,
-    required: true // 'arrays', 'loops', 'functions', etc.
-  },
-  level: {
-    type: Number,
-    min: 0,
-    max: 1,
-    default: 0
-  },
-  lastUpdated: {
-    type: Date,
-    default: Date.now
-  }
-});
-
+/**
+ * StudentTwin Model (BCNF Compliant)
+ * Represents the AI "digital twin" profile for a student.
+ * Competencies are now tracked in separate StudentCompetency model.
+ * Contains behavioral patterns and learning preferences.
+ */
 const studentTwinSchema = new mongoose.Schema({
-  student: {
+  studentId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Student',
     required: true,
     unique: true
   },
-  competencies: [competencySchema],
+  // Personality and learning style
+  personality: {
+    type: String,
+    enum: ['visual', 'auditory', 'kinesthetic', 'reading-writing', 'unknown'],
+    default: 'unknown'
+  },
+  preferredDifficulty: {
+    type: String,
+    enum: ['easy', 'medium', 'hard', 'adaptive'],
+    default: 'adaptive'
+  },
+  // Performance metrics
+  averageTimePerProblem: {
+    type: Number, // in minutes
+    default: 0
+  },
+  // AI-derived insights (arrays of topic names)
+  strengths: [{
+    type: String,
+    trim: true
+  }],
+  weaknesses: [{
+    type: String,
+    trim: true
+  }],
+  recommendedTopics: [{
+    type: String,
+    trim: true
+  }],
+  // Behavioral data
   behavioralData: {
     avgTypingSpeed: {
       type: Number, // characters per minute
       default: 0
     },
     avgThinkingPause: {
-      type: Number, // seconds
+      type: Number, // seconds between keystrokes
       default: 0
     },
     errorFrequency: {
-      type: Number,
+      type: Number, // average errors per session
       default: 0
     },
     aiDependencyScore: {
-      type: Number, // 0-1, higher = more dependent
+      type: Number, // 0-1, higher = more dependent on AI hints
       min: 0,
       max: 1,
       default: 0
     }
   },
+  // Progress metrics
   learningVelocity: {
-    type: Number, // Rate of improvement
+    type: Number, // Rate of improvement (positive = improving)
     default: 0
   },
   totalAIRequests: {
@@ -57,35 +76,87 @@ const studentTwinSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  totalActivitiesAttempted: {
+    type: Number,
+    default: 0
+  },
   lastActivityDate: {
+    type: Date
+  },
+  lastAnalyzedAt: {
     type: Date
   }
 }, {
   timestamps: true
 });
 
-// Method to update competency
-studentTwinSchema.methods.updateCompetency = function(topic, newLevel) {
-  const competency = this.competencies.find(c => c.topic === topic);
-  
-  if (competency) {
-    competency.level = newLevel;
-    competency.lastUpdated = new Date();
-  } else {
-    this.competencies.push({
-      topic,
-      level: newLevel,
-      lastUpdated: new Date()
-    });
+// Virtual to get competencies from StudentCompetency model
+studentTwinSchema.virtual('competencies', {
+  ref: 'StudentCompetency',
+  localField: 'studentId',
+  foreignField: 'studentId'
+});
+
+// Ensure virtuals are included in JSON
+studentTwinSchema.set('toJSON', { virtuals: true });
+studentTwinSchema.set('toObject', { virtuals: true });
+
+// Note: studentId already has unique: true which creates an index
+
+// Static method to get or create a student twin
+studentTwinSchema.statics.getOrCreate = async function(studentId) {
+  let twin = await this.findOne({ studentId });
+
+  if (!twin) {
+    twin = await this.create({ studentId });
   }
-  
+
+  return twin;
+};
+
+// Method to update after activity completion
+studentTwinSchema.methods.recordActivity = async function(passed, aiRequests = 0) {
+  this.totalActivitiesAttempted += 1;
+  if (passed) {
+    this.totalActivitiesCompleted += 1;
+  }
+  this.totalAIRequests += aiRequests;
+  this.lastActivityDate = new Date();
+
+  // Update AI dependency score
+  if (this.totalActivitiesAttempted > 0) {
+    this.behavioralData.aiDependencyScore = Math.min(
+      this.totalAIRequests / (this.totalActivitiesAttempted * 5), // Normalize: 5 requests per activity = 1.0
+      1
+    );
+  }
+
   return this.save();
 };
 
-// Method to get competency for a topic
-studentTwinSchema.methods.getCompetency = function(topic) {
-  const competency = this.competencies.find(c => c.topic === topic);
-  return competency ? competency.level : 0;
+// Method to update strengths and weaknesses from competencies
+studentTwinSchema.methods.updateInsights = async function() {
+  const StudentCompetency = mongoose.model('StudentCompetency');
+
+  const [strengths, weaknesses] = await Promise.all([
+    StudentCompetency.getStrengths(this.studentId, 3),
+    StudentCompetency.getWeaknesses(this.studentId, 3)
+  ]);
+
+  this.strengths = strengths.map(c => c.topic);
+  this.weaknesses = weaknesses.map(c => c.topic);
+
+  // Generate recommendations based on weaknesses
+  this.recommendedTopics = weaknesses.map(c => c.topic);
+
+  this.lastAnalyzedAt = new Date();
+
+  return this.save();
+};
+
+// Static method to get twin with competencies populated
+studentTwinSchema.statics.getWithCompetencies = function(studentId) {
+  return this.findOne({ studentId }).populate('competencies');
 };
 
 const StudentTwin = mongoose.model('StudentTwin', studentTwinSchema);

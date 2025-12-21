@@ -1,21 +1,33 @@
 import Submission from '../models/Submission.js';
 import Activity from '../models/Activity.js';
+import TestCase from '../models/TestCase.js';
+import TestResult from '../models/TestResult.js';
+import Student from '../models/Student.js';
 import StudentTwin from '../models/StudentTwin.js';
-import { runTestCases, LANGUAGE_IDS } from '../services/judge0Service.js';
+import StudentCompetency from '../models/StudentCompetency.js';
+import { runTestCases, executeCode, LANGUAGE_IDS } from '../services/judge0Service.js';
 
 // @desc    Submit code for an activity
 // @route   POST /api/submissions
 export const submitCode = async (req, res) => {
   try {
     const { activityId, code, language, timeSpent } = req.body;
-    const studentId = req.user._id;
 
-    // Get activity with test cases
-    const activity = await Activity.findById(activityId);
-    if (!activity) {
+    // Get student profile
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    if (!studentProfile) {
       return res.status(404).json({
         success: false,
-        message: 'Activity not found'
+        message: 'Student profile not found'
+      });
+    }
+
+    // Get activity with test cases
+    const activity = await Activity.findById(activityId).populate('testCases');
+    if (!activity || !activity.isActive) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found or is no longer available'
       });
     }
 
@@ -28,70 +40,140 @@ export const submitCode = async (req, res) => {
       });
     }
 
+    // Get test cases
+    const testCases = await TestCase.getByActivity(activityId);
+    if (testCases.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No test cases defined for this activity'
+      });
+    }
+
     // Run code against test cases
     console.log('Running test cases...');
-    const testResults = await runTestCases(code, languageId, activity.testCases);
+    const testCasesForJudge = testCases.map(tc => ({
+      input: tc.input,
+      expectedOutput: tc.expectedOutput
+    }));
+    const judgeResults = await runTestCases(code, languageId, testCasesForJudge);
 
-    // Calculate score
-    const totalTests = testResults.length;
-    const passedTests = testResults.filter(r => r.passed).length;
-    const score = Math.round((passedTests / totalTests) * 100);
+    // Calculate score using weights
+    const totalWeight = testCases.reduce((sum, tc) => sum + tc.weight, 0);
+    let earnedWeight = 0;
+    const testResultsData = [];
+
+    for (let i = 0; i < testCases.length; i++) {
+      const tc = testCases[i];
+      const result = judgeResults[i];
+
+      if (result.passed) {
+        earnedWeight += tc.weight;
+      }
+
+      testResultsData.push({
+        testCaseId: tc._id,
+        input: tc.input,
+        expectedOutput: tc.expectedOutput,
+        actualOutput: result.actualOutput || '',
+        passed: result.passed,
+        executionTime: parseFloat(result.executionTime) || 0,
+        memoryUsed: result.memory || 0,
+        errorMessage: result.stderr || result.compileOutput || null,
+        stderr: result.stderr || null,
+        compileOutput: result.compileOutput || null
+      });
+    }
+
+    const score = totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * 100) : 0;
+    const passedTests = testResultsData.filter(r => r.passed).length;
 
     // Determine overall status
     let status = 'failed';
     let compileError = null;
     let runtimeError = null;
 
-    if (passedTests === totalTests) {
+    if (passedTests === testCases.length) {
       status = 'passed';
-    } else if (testResults.some(r => r.compileOutput)) {
+    } else if (judgeResults.some(r => r.compileOutput)) {
       status = 'error';
-      compileError = testResults.find(r => r.compileOutput)?.compileOutput;
-    } else if (testResults.some(r => r.stderr)) {
+      compileError = judgeResults.find(r => r.compileOutput)?.compileOutput;
+    } else if (judgeResults.some(r => r.stderr)) {
       status = 'error';
-      runtimeError = testResults.find(r => r.stderr)?.stderr;
+      runtimeError = judgeResults.find(r => r.stderr)?.stderr;
     }
 
     // Calculate total execution time
-    const executionTime = testResults.reduce((sum, r) => sum + (parseFloat(r.executionTime) || 0), 0);
+    const executionTime = testResultsData.reduce((sum, r) => sum + r.executionTime, 0);
 
     // Get attempt number
     const previousSubmissions = await Submission.countDocuments({
-      student: studentId,
-      activity: activityId
+      studentId: studentProfile._id,
+      activityId: activityId
     });
 
-    // Create submission
+    // Create submission (labSessionId is set automatically by pre-save hook)
     const submission = await Submission.create({
-      student: studentId,
-      activity: activityId,
+      studentId: studentProfile._id,
+      activityId: activityId,
+      labSessionId: activity.labSession,
       code,
       language,
       status,
-      testResults,
       score,
-      executionTime: executionTime.toFixed(3),
+      executionTime,
       attemptNumber: previousSubmissions + 1,
       timeSpent: timeSpent || 0,
       compileError,
       runtimeError
     });
 
-    // Update best score
-    await Submission.updateBestScore(studentId, activityId);
+    // Create test results
+    await TestResult.createForSubmission(submission._id, testResultsData);
 
-    // Update student twin (if activity completed successfully)
-    if (status === 'passed') {
-      await updateStudentTwin(studentId, activity, submission);
+    // Update best score
+    await Submission.updateBestScore(studentProfile._id, activityId);
+
+    // Update student competency and twin
+    if (activity.topic) {
+      await StudentCompetency.updateFromSubmission(
+        studentProfile._id,
+        activity.topic,
+        status === 'passed'
+      );
+
+      const twin = await StudentTwin.getOrCreate(studentProfile._id);
+      await twin.recordActivity(status === 'passed', 0);
+      await twin.updateInsights();
     }
 
+    // Get test results for response
+    const testResults = await TestResult.getBySubmission(submission._id);
+
+    // Build test execution log for frontend compatibility
+    const testExecutionLog = testResults.map((result, index) => ({
+      testCase: index + 1,
+      step: result.passed ? 'PASSED' : 'FAILED',
+      timestamp: result.createdAt,
+      output: result.actualOutput || result.compileOutput || result.errorMessage || 'No output',
+      expected: result.expectedOutput,
+      input: result.input
+    }));
+
     // Populate activity details
-    await submission.populate('activity', 'title topic difficulty');
+    await submission.populate('activityId', 'title topic difficulty');
 
     res.status(201).json({
       success: true,
-      message: status === 'passed' ? 'All tests passed! 🎉' : 'Some tests failed',
-      data: submission
+      message: status === 'passed' ? 'All tests passed!' : 'Some tests failed',
+      data: {
+        compileError,
+        runtimeError,
+        testExecutionLog,
+        testResults,
+        score,
+        status,
+        submission
+      }
     });
   } catch (error) {
     console.error('Submission error:', error);
@@ -107,18 +189,28 @@ export const submitCode = async (req, res) => {
 // @route   GET /api/submissions/activity/:activityId
 export const getMySubmissions = async (req, res) => {
   try {
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    if (!studentProfile) {
+      return res.json({
+        success: true,
+        count: 0,
+        stats: { totalAttempts: 0, bestScore: 0, averageScore: 0, passed: false },
+        data: []
+      });
+    }
+
     const submissions = await Submission.find({
-      student: req.user._id,
-      activity: req.params.activityId
+      studentId: studentProfile._id,
+      activityId: req.params.activityId
     })
       .sort({ createdAt: -1 })
-      .select('-code'); // Don't send code in list view
+      .select('-code');
 
     // Get statistics
     const stats = {
       totalAttempts: submissions.length,
       bestScore: submissions.length > 0 ? Math.max(...submissions.map(s => s.score)) : 0,
-      averageScore: submissions.length > 0 
+      averageScore: submissions.length > 0
         ? Math.round(submissions.reduce((sum, s) => sum + s.score, 0) / submissions.length)
         : 0,
       passed: submissions.some(s => s.status === 'passed')
@@ -144,8 +236,11 @@ export const getMySubmissions = async (req, res) => {
 export const getSubmission = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id)
-      .populate('activity', 'title description topic difficulty')
-      .populate('student', 'name email studentId');
+      .populate('activityId', 'title description topic difficulty')
+      .populate({
+        path: 'studentId',
+        populate: { path: 'userId', select: 'firstName lastName email' }
+      });
 
     if (!submission) {
       return res.status(404).json({
@@ -154,17 +249,26 @@ export const getSubmission = async (req, res) => {
       });
     }
 
-    // Check if user owns this submission
-    if (submission.student._id.toString() !== req.user._id.toString() && req.user.role !== 'instructor') {
+    // Check if user owns this submission or is instructor
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    const isOwner = studentProfile && submission.studentId._id.toString() === studentProfile._id.toString();
+
+    if (!isOwner && req.user.role !== 'instructor') {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to view this submission'
       });
     }
 
+    // Get test results
+    const testResults = await TestResult.getBySubmission(submission._id);
+
     res.json({
       success: true,
-      data: submission
+      data: {
+        ...submission.toObject(),
+        testResults
+      }
     });
   } catch (error) {
     res.status(500).json({
@@ -179,38 +283,20 @@ export const getSubmission = async (req, res) => {
 // @route   GET /api/submissions/my
 export const getAllMySubmissions = async (req, res) => {
   try {
-    const submissions = await Submission.find({ student: req.user._id })
-      .populate('activity', 'title topic difficulty type')
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    if (!studentProfile) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+
+    const submissions = await Submission.find({ studentId: studentProfile._id })
+      .populate('activityId', 'title topic difficulty type')
       .sort({ createdAt: -1 })
       .select('-code');
 
-    // Group by activity
-    const groupedSubmissions = submissions.reduce((acc, sub) => {
-      const activityId = sub.activity._id.toString();
-      if (!acc[activityId]) {
-        acc[activityId] = {
-          activity: sub.activity,
-          submissions: [],
-          bestScore: 0,
-          totalAttempts: 0,
-          status: 'not_started'
-        };
-      }
-      acc[activityId].submissions.push(sub);
-      acc[activityId].totalAttempts++;
-      acc[activityId].bestScore = Math.max(acc[activityId].bestScore, sub.score);
-      if (sub.status === 'passed') {
-        acc[activityId].status = 'completed';
-      } else if (acc[activityId].status !== 'completed') {
-        acc[activityId].status = 'in_progress';
-      }
-      return acc;
-    }, {});
-
     res.json({
       success: true,
-      count: Object.keys(groupedSubmissions).length,
-      data: Object.values(groupedSubmissions)
+      count: submissions.length,
+      data: submissions
     });
   } catch (error) {
     res.status(500).json({
@@ -227,6 +313,14 @@ export const compareSubmissions = async (req, res) => {
   try {
     const { id1, id2 } = req.params;
 
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    if (!studentProfile) {
+      return res.status(403).json({
+        success: false,
+        message: 'Student profile not found'
+      });
+    }
+
     const [submission1, submission2] = await Promise.all([
       Submission.findById(id1),
       Submission.findById(id2)
@@ -240,8 +334,8 @@ export const compareSubmissions = async (req, res) => {
     }
 
     // Verify ownership
-    if (submission1.student.toString() !== req.user._id.toString() ||
-        submission2.student.toString() !== req.user._id.toString()) {
+    if (submission1.studentId.toString() !== studentProfile._id.toString() ||
+        submission2.studentId.toString() !== studentProfile._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized'
@@ -269,39 +363,68 @@ export const compareSubmissions = async (req, res) => {
   }
 };
 
-// Helper function to update student twin
-async function updateStudentTwin(studentId, activity, submission) {
+// @desc    Run code in sandbox mode (no test cases, just execute)
+// @route   POST /api/submissions/sandbox
+export const runSandbox = async (req, res) => {
   try {
-    let twin = await StudentTwin.findOne({ student: studentId });
-    
-    if (!twin) {
-      twin = await StudentTwin.create({
-        student: studentId,
-        competencies: []
+    const { code, language, stdin = '' } = req.body;
+
+    // Validate required fields
+    if (!code || !language) {
+      return res.status(400).json({
+        success: false,
+        message: 'Code and language are required'
       });
     }
 
-    // Update competency for this topic
-    const topicCompetency = twin.competencies.find(c => c.topic === activity.topic);
-    
-    if (topicCompetency) {
-      // Increase competency based on score and attempts
-      const improvement = (submission.score / 100) * 0.1 / submission.attemptNumber;
-      topicCompetency.level = Math.min(1, topicCompetency.level + improvement);
-      topicCompetency.lastUpdated = new Date();
-    } else {
-      twin.competencies.push({
-        topic: activity.topic,
-        level: (submission.score / 100) * 0.3, // Start at 30% of score
-        lastUpdated: new Date()
+    // Get language ID for Judge0
+    const languageId = LANGUAGE_IDS[language];
+    if (!languageId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid programming language. Supported: python, java, cpp'
       });
     }
 
-    twin.totalActivitiesCompleted += 1;
-    twin.lastActivityDate = new Date();
-    
-    await twin.save();
+    // Execute the code
+    const result = await executeCode(code, languageId, stdin);
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.message || 'Code execution failed'
+      });
+    }
+
+    const data = result.data;
+
+    // Parse execution time safely
+    const execTimeRaw = data?.time || '0';
+    const executionTime = parseFloat(
+      execTimeRaw.toString().match(/\d+(\.\d+)?/)?.[0] || 0
+    );
+
+    res.json({
+      success: true,
+      data: {
+        output: data?.stdout || '',
+        stderr: data?.stderr || '',
+        compileOutput: data?.compile_output || '',
+        status: data?.status?.description || 'Unknown',
+        statusId: data?.status?.id,
+        executionTime,
+        memory: data?.memory || 0,
+        // Determine if there was an error
+        hasError: data?.status?.id !== 3, // 3 = Accepted
+        errorType: data?.compile_output ? 'compile' : (data?.stderr ? 'runtime' : null)
+      }
+    });
   } catch (error) {
-    console.error('Error updating student twin:', error);
+    console.error('Sandbox execution error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Sandbox execution failed',
+      error: error.message
+    });
   }
-}
+};

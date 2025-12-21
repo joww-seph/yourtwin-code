@@ -5,15 +5,27 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import connectDB from './config/database.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { initializeSocket } from './utils/socket.js';
 import labSessionRoutes from './routes/labSessionRoutes.js';
 
 // Import routes
 import authRoutes from './routes/authRoutes.js';
 import activityRoutes from './routes/activityRoutes.js';
 import submissionRoutes from './routes/submissionRoutes.js';
+import studentRoutes from './routes/studentRoutes.js';
 
 // Load environment variables
 dotenv.config();
+
+// Validate required environment variables
+const requiredEnvVars = ['MONGODB_URI', 'JWT_SECRET', 'JUDGE0_API_URL'];
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingEnvVars.length > 0) {
+  console.error('❌ Missing required environment variables:', missingEnvVars.join(', '));
+  console.error('Please check your .env file and ensure all required variables are set.');
+  process.exit(1);
+}
 
 // Initialize Express app
 const app = express();
@@ -60,28 +72,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/lab-sessions', labSessionRoutes);
+app.use('/api/students', studentRoutes);
 
-// Socket.io connection handling
-io.on('connection', (socket) => {
-  console.log('✅ Client connected:', socket.id);
-  
-  // Join room based on role
-  socket.on('join-room', (data) => {
-    const { userId, role } = data;
-    socket.join(`${role}-${userId}`);
-    console.log(`User ${userId} joined ${role} room`);
-  });
-  
-  // Student code update (send to instructor)
-  socket.on('student-code-update', (data) => {
-    io.to('instructor-dashboard').emit('code-update', data);
-  });
-  
-  // Handle disconnect
-  socket.on('disconnect', () => {
-    console.log('❌ Client disconnected:', socket.id);
-  });
-});
+// Initialize Socket.io with connection handling
+initializeSocket(io);
 
 // 404 handler
 app.use((req, res) => {

@@ -1,25 +1,51 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { activityAPI } from '../services/api';
-import { Users, Activity, AlertCircle, CheckCircle, LogOut, Plus } from 'lucide-react';
+import { useSocket } from '../contexts/SocketContext';
+import { labSessionAPI } from '../services/api';
+import { Users, BookOpen, AlertCircle, CheckCircle, LogOut, Plus, Calendar, Clock, MapPin } from 'lucide-react';
 
 function InstructorDashboard() {
   const { user, logout } = useAuth();
-  const [activities, setActivities] = useState([]);
+  const { socket } = useSocket();
+  const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-    useEffect(() => {
-    fetchActivities();
+  useEffect(() => {
+    fetchSessions();
   }, []);
 
-  const fetchActivities = async () => {
+  // Listen for real-time updates
+  useEffect(() => {
+    if (socket) {
+      const handleRefresh = () => {
+        console.log('📡 [Instructor Dashboard] Session event received - refreshing');
+        fetchSessions();
+      };
+
+      socket.on('lab-session-created', handleRefresh);
+      socket.on('lab-session-updated', handleRefresh);
+      socket.on('lab-session-deleted', handleRefresh);
+      socket.on('lab-session-activated', handleRefresh);
+      socket.on('lab-session-deactivated', handleRefresh);
+
+      return () => {
+        socket.off('lab-session-created');
+        socket.off('lab-session-updated');
+        socket.off('lab-session-deleted');
+        socket.off('lab-session-activated');
+        socket.off('lab-session-deactivated');
+      };
+    }
+  }, [socket]);
+
+  const fetchSessions = async () => {
     try {
-      const response = await activityAPI.getAll();
-      setActivities(response.data.data);
+      const response = await labSessionAPI.getAll();
+      setSessions(response.data.data);
     } catch (error) {
-      console.error('Failed to fetch activities:', error);
+      console.error('Failed to fetch sessions:', error);
     } finally {
       setLoading(false);
     }
@@ -39,9 +65,10 @@ function InstructorDashboard() {
   }
 
   // Calculate stats from real data
-  const totalActivities = activities.length;
-  const practiceActivities = activities.filter(a => a.type === 'practice').length;
-  const finalActivities = activities.filter(a => a.type === 'final').length;
+  const totalSessions = sessions.length;
+  const activeSessions = sessions.filter(s => s.isActive).length;
+  const totalActivities = sessions.reduce((sum, s) => sum + (s.activities?.length || 0), 0);
+  const totalStudents = sessions.reduce((sum, s) => sum + (s.allowedStudents?.length || 0), 0);
 
   return (
     <div className="min-h-screen bg-[#1e1e2e]">
@@ -56,7 +83,7 @@ function InstructorDashboard() {
               </h2>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-sm text-[#bac2de]">Welcome, {user?.name}</span>
+              <span className="text-sm text-[#bac2de]">Welcome, Prof. {user?.firstName} {user?.lastName}</span>
               <button
                 onClick={handleLogout}
                 className="p-2 hover:bg-[#45475a] rounded-lg transition"
@@ -74,65 +101,57 @@ function InstructorDashboard() {
         {/* Stats Overview */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <StatCard
-            icon={<Activity className="w-6 h-6" />}
-            title="Total Activities"
-            value={totalActivities}
+            icon={<BookOpen className="w-6 h-6" />}
+            title="Lab Sessions"
+            value={totalSessions}
             color="blue"
           />
           <StatCard
             icon={<CheckCircle className="w-6 h-6" />}
-            title="Practice Activities"
-            value={practiceActivities}
+            title="Active Sessions"
+            value={activeSessions}
             color="green"
           />
           <StatCard
             icon={<AlertCircle className="w-6 h-6" />}
-            title="Final Activities"
-            value={finalActivities}
-            color="red"
+            title="Total Activities"
+            value={totalActivities}
+            color="yellow"
           />
           <StatCard
             icon={<Users className="w-6 h-6" />}
-            title="Students"
-            value="0"
+            title="Enrolled Students"
+            value={totalStudents}
             color="purple"
           />
         </div>
 
-        {/* Activity Management */}
+        {/* Lab Sessions Management */}
         <div className="bg-[#313244] border border-[#45475a] rounded-lg shadow-lg mb-8">
           <div className="p-6 border-b border-[#45475a] flex items-center justify-between">
-            <h2 className="text-xl font-bold text-[#cdd6f4]">Activity Management</h2>
-            <button className="px-4 py-2 bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] text-[#1e1e2e] rounded-lg hover:opacity-90 transition font-medium text-sm">
+            <h2 className="text-xl font-bold text-[#cdd6f4]">Lab Sessions</h2>
+            <button 
+              onClick={() => navigate('/instructor/lab-sessions')}
+              className="px-4 py-2 bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] text-[#1e1e2e] rounded-lg hover:opacity-90 transition font-medium text-sm flex items-center gap-2"
+            >
               <Plus className="w-4 h-4" />
-              Create Activity
+              Manage Sessions
             </button>
           </div>
           <div className="p-6">
-            {activities.length === 0 ? (
-              <p className="text-[#bac2de] text-center py-8">No activities yet. Create your first activity!</p>
+            {sessions.length === 0 ? (
+              <p className="text-[#bac2de] text-center py-8">No lab sessions yet. Create your first session!</p>
             ) : (
               <div className="space-y-3">
-                {activities.map((activity) => (
-                  <ActivityRow key={activity._id} activity={activity} />
+                {sessions.map((session) => (
+                  <SessionRow 
+                    key={session._id} 
+                    session={session}
+                    onNavigate={() => navigate(`/instructor/lab-sessions/${session._id}`)}
+                  />
                 ))}
               </div>
             )}
-          </div>
-        </div>
-          
-        {/* Placeholder for Real-Time Monitor */}
-        <div className="bg-[#313244] border border-[#45475a] rounded-lg shadow-lg mb-8">
-          <div className="p-6 border-b border-[#45475a] flex items-center justify-between">
-            <h2 className="text-xl font-bold text-[#cdd6f4]">Real-Time Student Monitor</h2>
-            <p className="text-sm text-[#bac2de] mt-1">
-              Live monitoring will appear here during lab sessions
-            </p>
-          </div>
-          <div className="p-6">
-            <p className="text-[#bac2de] text-center py-12">
-              No active lab session
-            </p>
           </div>
         </div>
       </main>
@@ -145,7 +164,7 @@ function StatCard({ icon, title, value, color }) {
   const colorClasses = {
     blue: 'bg-[#89b4fa] bg-opacity-20 text-[#89b4fa]',
     green: 'bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1]',
-    red: 'bg-[#f38ba8] bg-opacity-20 text-[#f38ba8]',
+    yellow: 'bg-[#f9e2af] bg-opacity-20 text-[#f9e2af]',
     purple: 'bg-[#cba6f7] bg-opacity-20 text-[#cba6f7]'
   };
 
@@ -160,91 +179,67 @@ function StatCard({ icon, title, value, color }) {
   );
 }
 
-function ActivityRow({ activity }) {
-  const typeStyles = {
-    practice: 'bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1] border border-[#a6e3a1] border-opacity-30',
-    final: 'bg-[#f38ba8] bg-opacity-20 text-[#f38ba8] border border-[#f38ba8] border-opacity-30'
-  };
+function SessionRow({ session, onNavigate }) {
+  const activitiesCount = session.activities?.length || 0;
+  const studentsCount = session.allowedStudents?.length || 0;
 
   return (
-    <div className="border border-[#45475a] bg-[#181825] rounded-lg p-4 hover:border-[#89b4fa] transition">
+    <div
+      className="border border-[#45475a] bg-[#181825] rounded-lg p-4 hover:border-[#89b4fa] transition cursor-pointer group"
+      onClick={onNavigate}
+    >
       <div className="flex items-center justify-between">
         <div className="flex-1">
-          <h4 className="font-medium text-[#cdd6f4] mb-1">{activity.title}</h4>
-          <div className="flex items-center gap-3 text-sm text-[#bac2de]">
-            <span>{activity.topic}</span>
-            <span>•</span>
-            <span>{activity.language.toUpperCase()}</span>
-            <span>•</span>
-            <span>{activity.difficulty}</span>
-            <span className={`px-2 py-1 rounded text-xs font-medium ${typeStyles[activity.type]}`}>
-              {activity.type}
+          <div className="flex items-center gap-3 mb-2">
+            <h4 className="font-medium text-[#cdd6f4] text-lg">{session.title}</h4>
+            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+              session.isActive
+                ? 'bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1]'
+                : 'bg-[#f38ba8] bg-opacity-20 text-[#f38ba8]'
+            }`}>
+              {session.isActive ? 'Active' : 'Inactive'}
+            </span>
+            {/* Target audience badge */}
+            <span className="px-2 py-1 text-xs font-medium rounded-full bg-[#cba6f7] bg-opacity-20 text-[#cba6f7]">
+              {session.course} {session.yearLevel}-{session.section}
+            </span>
+          </div>
+          <p className="text-sm text-[#bac2de] mb-3">{session.description}</p>
+
+          {/* Schedule info */}
+          <div className="flex items-center gap-4 text-sm text-[#bac2de] mb-2">
+            <span className="flex items-center gap-1">
+              <Calendar className="w-4 h-4" /> {new Date(session.scheduledDate).toLocaleDateString()}
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock className="w-4 h-4" /> {session.startTime} - {session.endTime}
+            </span>
+            {session.room && (
+              <span className="flex items-center gap-1">
+                <MapPin className="w-4 h-4" /> {session.room}
+              </span>
+            )}
+          </div>
+
+          {/* Stats */}
+          <div className="flex items-center gap-4 text-sm text-[#bac2de]">
+            <span className="flex items-center gap-1">
+              <BookOpen className="w-4 h-4" /> {activitiesCount} activities
+            </span>
+            <span className="flex items-center gap-1">
+              <Users className="w-4 h-4" /> {studentsCount} students
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="px-3 py-1 text-sm text-[#89b4fa] hover:bg-[#89b4fa] hover:bg-opacity-10 rounded transition">
-            Edit
-          </button>
-          <button className="px-3 py-1 text-sm text-[#f38ba8] hover:bg-[#f38ba8] hover:bg-opacity-10 rounded transition">
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StudentCard({ name, activity, status, aiRequests }) {
-  const statusStyles = {
-    progress: 'border-[#a6e3a1] border-opacity-50 bg-[#a6e3a1] bg-opacity-10',
-    struggling: 'border-[#f9e2af] border-opacity-50 bg-[#f9e2af] bg-opacity-10',
-    lockdown: 'border-[#cba6f7] border-opacity-50 bg-[#cba6f7] bg-opacity-10'
-  };
-
-  const statusDots = {
-    progress: 'bg-[#a6e3a1]',
-    struggling: 'bg-[#f9e2af]',
-    lockdown: 'bg-[#cba6f7]'
-  };
-
-  return (
-    <div className={`border-2 rounded-lg p-4 ${statusStyles[status]}`}>
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${statusDots[status]} animate-pulse`}></div>
-            <p className="font-medium text-[#cdd6f4]">{name}</p>
-          </div>
-          <p className="text-sm text-[#bac2de] mt-1">{activity}</p>
-        </div>
-      </div>
-      <div className="text-xs text-[#9399b2]">
-        AI Requests: {aiRequests}
-      </div>
-    </div>
-  );
-}
-
-function AlertItem({ type, student, message, time }) {
-  const typeStyles = {
-    warning: 'bg-[#f9e2af] bg-opacity-20 border-[#f9e2af] border-opacity-30 text-[#f9e2af]',
-    danger: 'bg-[#f38ba8] bg-opacity-20 border-[#f38ba8] border-opacity-30 text-[#f38ba8]',
-    info: 'bg-[#89b4fa] bg-opacity-20 border-[#89b4fa] border-opacity-30 text-[#89b4fa]'
-  };
-
-  return (
-    <div className="p-4 hover:bg-[#181825] transition">
-      <div className="flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-[#9399b2] mt-0.5" />
-        <div className="flex-1">
-          <p className="font-medium text-[#cdd6f4]">{student}</p>
-          <p className="text-sm text-[#bac2de] mt-1">{message}</p>
-          <p className="text-xs text-[#9399b2] mt-2">{time}</p>
-        </div>
-        <span className={`px-2 py-1 rounded text-xs font-medium border ${typeStyles[type]}`}>
-          {type}
-        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigate();
+          }}
+          className="px-4 py-2 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] rounded-lg transition font-medium text-sm opacity-0 group-hover:opacity-100"
+        >
+          Manage
+        </button>
       </div>
     </div>
   );

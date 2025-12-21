@@ -1,20 +1,24 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import axios from 'axios';
-import { 
-  Calendar, 
-  Clock, 
-  Users, 
-  Plus, 
-  Edit, 
+import { useSocket } from '../contexts/SocketContext';
+import { labSessionAPI } from '../services/api';
+import { showSuccess, showError, showDeleteConfirm } from '../utils/sweetalert';
+import {
+  Calendar,
+  Clock,
+  Users,
+  Plus,
+  Edit,
   Trash2,
   ChevronRight,
-  AlertCircle 
+  AlertCircle,
+  ArrowLeft
 } from 'lucide-react';
 
 function LabSessionsPage() {
   const { user } = useAuth();
+  const { socket } = useSocket();
   const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,16 +28,42 @@ function LabSessionsPage() {
     fetchSessions();
   }, [filter]);
 
+  // Listen for real-time updates
+  useEffect(() => {
+    if (socket) {
+      const handleRefresh = () => {
+        console.log('📡 [Instructor] Lab session event received - refreshing');
+        fetchSessions();
+      };
+
+      socket.on('lab-session-created', handleRefresh);
+      socket.on('lab-session-updated', handleRefresh);
+      socket.on('lab-session-deleted', handleRefresh);
+
+      return () => {
+        socket.off('lab-session-created');
+        socket.off('lab-session-updated');
+        socket.off('lab-session-deleted');
+      };
+    }
+  }, [socket]);
+
   const fetchSessions = async () => {
     try {
-      const params = filter !== 'all' ? { status: filter } : {};
-      const response = await axios.get('http://localhost:5000/api/lab-sessions', {
-        params,
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      setSessions(response.data.data);
+      let allSessions = [];
+      
+      if (filter === 'all') {
+        // Get all sessions without status filter
+        const response = await labSessionAPI.getAll();
+        allSessions = response.data.data;
+      } else {
+        // Get sessions filtered by status
+        const response = await labSessionAPI.getAll();
+        // Frontend filtering - in case backend doesn't fully support it
+        allSessions = response.data.data.filter(s => s.status === filter);
+      }
+      
+      setSessions(allSessions);
     } catch (error) {
       console.error('Failed to fetch sessions:', error);
     } finally {
@@ -42,17 +72,15 @@ function LabSessionsPage() {
   };
 
   const handleDelete = async (sessionId) => {
-    if (!confirm('Are you sure you want to delete this lab session?')) return;
+    const result = await showDeleteConfirm('this lab session');
+    if (!result.isConfirmed) return;
 
     try {
-      await axios.delete(`http://localhost:5000/api/lab-sessions/${sessionId}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      await labSessionAPI.delete(sessionId);
       fetchSessions();
+      showSuccess('Lab session deleted successfully!');
     } catch (error) {
-      alert('Failed to delete session');
+      showError('Failed to delete session', 'Please try again.');
     }
   };
 
@@ -69,9 +97,18 @@ function LabSessionsPage() {
       {/* Header */}
       <header className="bg-[#313244] border-b border-[#45475a] px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-[#cdd6f4]">Laboratory Sessions</h1>
-            <p className="text-sm text-[#bac2de] mt-1">Manage your lab sessions and activities</p>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate('/instructor/dashboard')}
+              className="p-2 hover:bg-[#45475a] rounded-lg transition"
+              title="Back to Dashboard"
+            >
+              <ArrowLeft className="w-5 h-5 text-[#bac2de]" />
+            </button>
+            <div>
+              <h1 className="text-2xl font-bold text-[#cdd6f4]">Laboratory Sessions</h1>
+              <p className="text-sm text-[#bac2de] mt-1">Manage your lab sessions and activities</p>
+            </div>
           </div>
           <button
             onClick={() => navigate('/instructor/lab-sessions/create')}

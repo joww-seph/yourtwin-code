@@ -1,20 +1,138 @@
 import Activity from '../models/Activity.js';
+import LabSession from '../models/LabSession.js';
+import TestCase from '../models/TestCase.js';
+import Student from '../models/Student.js';
+import SessionEnrollment from '../models/SessionEnrollment.js';
+import { emitToLabSession, emitToAllStudents, emitToAllInstructors } from '../utils/socket.js';
 
-// @desc    Get all activities
-// @route   GET /api/activities
-export const getActivities = async (req, res) => {
+// @desc    Create activity within a lab session
+// @route   POST /api/lab-sessions/:sessionId/activities
+export const createActivity = async (req, res) => {
   try {
-    const { type, topic, difficulty } = req.query;
-    
-    const filter = { isActive: true };
-    if (type) filter.type = type;
-    if (topic) filter.topic = topic;
-    if (difficulty) filter.difficulty = difficulty;
-    
-    const activities = await Activity.find(filter)
-      .populate('createdBy', 'name email')
-      .sort({ createdAt: -1 });
-    
+    const { sessionId } = req.params;
+    const { testCases: testCasesData, ...activityData } = req.body;
+
+    // Get lab session
+    const labSession = await LabSession.findById(sessionId);
+    if (!labSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lab session not found'
+      });
+    }
+
+    // Check ownership
+    if (labSession.instructor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to add activities to this session'
+      });
+    }
+
+    // Count existing activities for order
+    const existingCount = await Activity.countDocuments({ labSession: sessionId });
+
+    // Create activity
+    const activity = await Activity.create({
+      ...activityData,
+      labSession: sessionId,
+      createdBy: req.user._id,
+      orderInSession: existingCount + 1
+    });
+
+    // Create test cases if provided
+    if (testCasesData && testCasesData.length > 0) {
+      const testCases = testCasesData.map((tc, index) => ({
+        activityId: activity._id,
+        input: tc.input || '',
+        expectedOutput: tc.expectedOutput,
+        isHidden: tc.isHidden || false,
+        weight: tc.weight || tc.points || 1,
+        description: tc.description || '',
+        orderIndex: index
+      }));
+      await TestCase.insertMany(testCases);
+    }
+
+    // Populate activity with test cases
+    await activity.populate('testCases');
+    await activity.populate('createdBy', 'firstName lastName email');
+
+    // Emit real-time update
+    console.log(`📡 [Socket] Activity created: ${activity.title} in session ${sessionId}`);
+    emitToLabSession(sessionId, 'activity-created', {
+      sessionId,
+      activity
+    });
+    emitToAllStudents('activity-created', {
+      sessionId,
+      activity
+    });
+    emitToAllInstructors('activity-created', {
+      sessionId,
+      activity
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Activity created successfully in session',
+      data: activity
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create activity',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get activities in a lab session
+// @route   GET /api/lab-sessions/:sessionId/activities
+export const getSessionActivities = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    // Get lab session
+    const labSession = await LabSession.findById(sessionId);
+    if (!labSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lab session not found'
+      });
+    }
+
+    // Check if student has access to session
+    if (req.user.role === 'student') {
+      const studentProfile = await Student.findOne({ userId: req.user._id });
+      if (!studentProfile) {
+        return res.status(403).json({
+          success: false,
+          message: 'Student profile not found'
+        });
+      }
+
+      const isEnrolled = await SessionEnrollment.isEnrolled(sessionId, studentProfile._id);
+      if (!isEnrolled) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have access to this session'
+        });
+      }
+
+      if (!labSession.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'This session is not active'
+        });
+      }
+    }
+
+    const activities = await Activity.find({ labSession: sessionId, isActive: true })
+      .populate('testCases')
+      .populate('createdBy', 'firstName lastName email')
+      .sort({ orderInSession: 1 });
+
     res.json({
       success: true,
       count: activities.length,
@@ -34,15 +152,45 @@ export const getActivities = async (req, res) => {
 export const getActivity = async (req, res) => {
   try {
     const activity = await Activity.findById(req.params.id)
-      .populate('createdBy', 'name email');
-    
+      .populate('testCases')
+      .populate('labSession', 'title isActive instructor')
+      .populate('createdBy', 'firstName lastName email');
+
     if (!activity) {
       return res.status(404).json({
         success: false,
         message: 'Activity not found'
       });
     }
-    
+
+    // Check if student has access
+    if (req.user.role === 'student') {
+      const studentProfile = await Student.findOne({ userId: req.user._id });
+      if (!studentProfile) {
+        return res.status(403).json({
+          success: false,
+          message: 'Student profile not found'
+        });
+      }
+
+      const labSession = await LabSession.findById(activity.labSession._id);
+      const isEnrolled = await SessionEnrollment.isEnrolled(labSession._id, studentProfile._id);
+
+      if (!isEnrolled) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have access to this activity'
+        });
+      }
+
+      if (!labSession.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'This session is not active'
+        });
+      }
+    }
+
     res.json({
       success: true,
       data: activity
@@ -56,50 +204,79 @@ export const getActivity = async (req, res) => {
   }
 };
 
-// @desc    Create activity (Instructor only)
-// @route   POST /api/activities
-export const createActivity = async (req, res) => {
-  try {
-    const activity = await Activity.create({
-      ...req.body,
-      createdBy: req.user._id
-    });
-    
-    res.status(201).json({
-      success: true,
-      message: 'Activity created successfully',
-      data: activity
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create activity',
-      error: error.message
-    });
-  }
-};
-
 // @desc    Update activity (Instructor only)
 // @route   PUT /api/activities/:id
 export const updateActivity = async (req, res) => {
   try {
-    const activity = await Activity.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
-    
+    const { testCases: testCasesData, ...activityData } = req.body;
+    const activity = await Activity.findById(req.params.id);
+
     if (!activity) {
       return res.status(404).json({
         success: false,
         message: 'Activity not found'
       });
     }
-    
+
+    // Check if user is the creator
+    if (activity.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this activity'
+      });
+    }
+
+    // Update activity
+    const updatedActivity = await Activity.findByIdAndUpdate(
+      req.params.id,
+      activityData,
+      { new: true, runValidators: true }
+    ).populate('createdBy', 'firstName lastName email');
+
+    // Update test cases if provided
+    if (testCasesData && Array.isArray(testCasesData)) {
+      // Delete existing test cases
+      await TestCase.deleteMany({ activityId: activity._id });
+
+      // Create new test cases
+      if (testCasesData.length > 0) {
+        const testCases = testCasesData.map((tc, index) => ({
+          activityId: activity._id,
+          input: tc.input || '',
+          expectedOutput: tc.expectedOutput,
+          isHidden: tc.isHidden || false,
+          weight: tc.weight || tc.points || 1,
+          description: tc.description || '',
+          orderIndex: index
+        }));
+        await TestCase.insertMany(testCases);
+      }
+    }
+
+    // Populate test cases
+    await updatedActivity.populate('testCases');
+
+    // Emit real-time update
+    if (updatedActivity.labSession) {
+      console.log(`📡 [Socket] Activity updated: ${updatedActivity.title}`);
+      emitToLabSession(updatedActivity.labSession, 'activity-updated', {
+        sessionId: updatedActivity.labSession,
+        activity: updatedActivity
+      });
+      emitToAllStudents('activity-updated', {
+        sessionId: updatedActivity.labSession,
+        activity: updatedActivity
+      });
+      emitToAllInstructors('activity-updated', {
+        sessionId: updatedActivity.labSession,
+        activity: updatedActivity
+      });
+    }
+
     res.json({
       success: true,
       message: 'Activity updated successfully',
-      data: activity
+      data: updatedActivity
     });
   } catch (error) {
     res.status(500).json({
@@ -115,18 +292,48 @@ export const updateActivity = async (req, res) => {
 export const deleteActivity = async (req, res) => {
   try {
     const activity = await Activity.findById(req.params.id);
-    
+
     if (!activity) {
       return res.status(404).json({
         success: false,
         message: 'Activity not found'
       });
     }
-    
-    // Soft delete
+
+    // Check if user is the creator
+    if (activity.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to delete this activity'
+      });
+    }
+
+    // Store session ID before soft delete
+    const sessionId = activity.labSession;
+
+    // Soft delete activity
     activity.isActive = false;
     await activity.save();
-    
+
+    // Note: Test cases remain in database for historical record
+
+    // Emit real-time update
+    if (sessionId) {
+      console.log(`📡 [Socket] Activity deleted: ${activity.title}`);
+      emitToLabSession(sessionId, 'activity-deleted', {
+        sessionId: sessionId,
+        activityId: activity._id
+      });
+      emitToAllStudents('activity-deleted', {
+        sessionId: sessionId,
+        activityId: activity._id
+      });
+      emitToAllInstructors('activity-deleted', {
+        sessionId: sessionId,
+        activityId: activity._id
+      });
+    }
+
     res.json({
       success: true,
       message: 'Activity deleted successfully'

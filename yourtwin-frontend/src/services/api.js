@@ -40,7 +40,8 @@ api.interceptors.response.use(
 export const authAPI = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
-  getMe: () => api.get('/auth/me')
+  getMe: () => api.get('/auth/me'),
+  updateProfile: (data) => api.put('/auth/profile', data)
 };
 
 // Activity API calls
@@ -58,7 +59,35 @@ export const submissionAPI = {
   getMySubmissions: (activityId) => api.get(`/submissions/activity/${activityId}`),
   getAll: () => api.get('/submissions/my'),
   getOne: (id) => api.get(`/submissions/${id}`),
-  compare: (id1, id2) => api.get(`/submissions/compare/${id1}/${id2}`)
+  compare: (id1, id2) => api.get(`/submissions/compare/${id1}/${id2}`),
+  runSandbox: (data) => api.post('/submissions/sandbox', data)
+};
+
+// Lab Session API calls
+export const labSessionAPI = {
+  getAll: () => api.get('/lab-sessions'),
+  getOne: (id) => api.get(`/lab-sessions/${id}`),
+  create: (data) => api.post('/lab-sessions', data),
+  update: (id, data) => api.put(`/lab-sessions/${id}`, data),
+  delete: (id) => api.delete(`/lab-sessions/${id}`),
+  activate: (id) => api.put(`/lab-sessions/${id}/activate`),
+  deactivate: (id) => api.put(`/lab-sessions/${id}/deactivate`),
+  
+  // Student management
+  addStudents: (id, studentIds) => api.post(`/lab-sessions/${id}/students`, { studentIds }),
+  removeStudent: (id, studentId) => api.delete(`/lab-sessions/${id}/students/${studentId}`),
+  getAvailableStudents: (id, filters) => api.get(`/lab-sessions/${id}/available-students`, { params: filters }),
+  
+  // Activities within session
+  createActivity: (id, data) => api.post(`/lab-sessions/${id}/activities`, data),
+  getActivities: (id) => api.get(`/lab-sessions/${id}/activities`)
+};
+
+// Student API calls
+export const studentAPI = {
+  search: (params) => api.get('/students/search', { params }),
+  getAll: (params) => api.get('/students', { params }),
+  getOne: (id) => api.get(`/students/${id}`)
 };
 
 export default api;

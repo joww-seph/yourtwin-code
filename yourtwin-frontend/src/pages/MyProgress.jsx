@@ -1,20 +1,23 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { submissionAPI } from '../services/api';
-import { 
-  ArrowLeft, 
-  TrendingUp, 
-  CheckCircle, 
+import { labSessionAPI, submissionAPI } from '../services/api';
+import {
+  ArrowLeft,
+  TrendingUp,
+  CheckCircle,
   XCircle,
   Clock,
-  Target
+  Target,
+  Calendar,
+  Code
 } from 'lucide-react';
 
 function MyProgress() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [progress, setProgress] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -23,8 +26,14 @@ function MyProgress() {
 
   const fetchProgress = async () => {
     try {
-      const response = await submissionAPI.getAll();
-      setProgress(response.data.data);
+      // Fetch all lab sessions student is enrolled in
+      const [sessionsRes, submissionsRes] = await Promise.all([
+        labSessionAPI.getAll(),
+        submissionAPI.getAll()
+      ]);
+      // Backend already filters for active sessions and allowedStudents for students
+      setSessions(sessionsRes.data.data);
+      setSubmissions(submissionsRes.data.data || []);
     } catch (error) {
       console.error('Failed to fetch progress:', error);
     } finally {
@@ -40,12 +49,32 @@ function MyProgress() {
     );
   }
 
+  // Helper to get completed activities for a session
+  const getCompletedActivitiesForSession = (session) => {
+    if (!session || !session.activities) return 0;
+    const sessionActivityIds = (session.activities || [])
+      .filter(a => a != null)
+      .map(a => a._id || a);
+    return sessionActivityIds.filter(activityId => {
+      return (submissions || []).some(sub => {
+        if (!sub || !sub.activityId) return false;
+        // Use activityId (BCNF field name) - backend returns activityId, not activity
+        const subActivityId = typeof sub.activityId === 'object' ? sub.activityId?._id : sub.activityId;
+        return subActivityId === activityId && sub.status === 'passed';
+      });
+    }).length;
+  };
+
   // Calculate overall stats
-  const totalActivities = progress.length;
-  const completedActivities = progress.filter(p => p.status === 'completed').length;
-  const averageScore = progress.length > 0
-    ? Math.round(progress.reduce((sum, p) => sum + p.bestScore, 0) / progress.length)
-    : 0;
+  const totalSessions = sessions.length;
+  const completedSessions = sessions.filter(session => {
+    const sessionActivitiesCount = (session?.activities?.length || 0);
+    if (sessionActivitiesCount === 0) return false;
+    const completedCount = getCompletedActivitiesForSession(session);
+    return completedCount === sessionActivitiesCount;
+  }).length;
+  const totalActivities = sessions.reduce((sum, s) => sum + (s?.activities?.length || 0), 0);
+  const completedActivities = sessions.reduce((sum, s) => sum + getCompletedActivitiesForSession(s), 0);
 
   return (
     <div className="min-h-screen bg-[#1e1e2e]">
@@ -63,7 +92,9 @@ function MyProgress() {
               <h1 className="text-2xl font-bold bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] bg-clip-text text-transparent">
                 My Progress
               </h1>
-              <p className="text-sm text-[#bac2de] mt-1">{user?.name}</p>
+              <p className="text-sm text-[#bac2de] mt-1">
+                {user?.displayName || `${user?.firstName} ${user?.lastName}`}
+              </p>
             </div>
           </div>
         </div>
@@ -76,7 +107,25 @@ function MyProgress() {
           <div className="bg-[#313244] border border-[#45475a] rounded-lg p-6">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-3 bg-[#89b4fa] bg-opacity-20 rounded-lg">
-                <Target className="w-6 h-6 text-[#89b4fa]" />
+                <Calendar className="w-6 h-6 text-[#89b4fa]" />
+              </div>
+              <div>
+                <p className="text-sm text-[#bac2de]">Sessions</p>
+                <p className="text-2xl font-bold text-[#cdd6f4]">{completedSessions}/{totalSessions}</p>
+              </div>
+            </div>
+            <div className="w-full bg-[#45475a] rounded-full h-2">
+              <div 
+                className="bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] h-2 rounded-full transition-all duration-500"
+                style={{ width: `${totalSessions > 0 ? (completedSessions / totalSessions) * 100 : 0}%` }}
+              ></div>
+            </div>
+          </div>
+
+          <div className="bg-[#313244] border border-[#45475a] rounded-lg p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-[#a6e3a1] bg-opacity-20 rounded-lg">
+                <Code className="w-6 h-6 text-[#a6e3a1]" />
               </div>
               <div>
                 <p className="text-sm text-[#bac2de]">Activities</p>
@@ -84,8 +133,8 @@ function MyProgress() {
               </div>
             </div>
             <div className="w-full bg-[#45475a] rounded-full h-2">
-              <div 
-                className="bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] h-2 rounded-full transition-all duration-500"
+              <div
+                className="bg-gradient-to-r from-[#a6e3a1] to-[#89b4fa] h-2 rounded-full transition-all duration-500"
                 style={{ width: `${totalActivities > 0 ? (completedActivities / totalActivities) * 100 : 0}%` }}
               ></div>
             </div>
@@ -93,98 +142,78 @@ function MyProgress() {
 
           <div className="bg-[#313244] border border-[#45475a] rounded-lg p-6">
             <div className="flex items-center gap-3 mb-2">
-              <div className="p-3 bg-[#a6e3a1] bg-opacity-20 rounded-lg">
-                <TrendingUp className="w-6 h-6 text-[#a6e3a1]" />
-              </div>
-              <div>
-                <p className="text-sm text-[#bac2de]">Average Score</p>
-                <p className="text-2xl font-bold text-[#cdd6f4]">{averageScore}%</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-[#313244] border border-[#45475a] rounded-lg p-6">
-            <div className="flex items-center gap-3 mb-2">
               <div className="p-3 bg-[#f9e2af] bg-opacity-20 rounded-lg">
-                <Clock className="w-6 h-6 text-[#f9e2af]" />
+                <Target className="w-6 h-6 text-[#f9e2af]" />
               </div>
               <div>
-                <p className="text-sm text-[#bac2de]">Total Attempts</p>
+                <p className="text-sm text-[#bac2de]">Completion Rate</p>
                 <p className="text-2xl font-bold text-[#cdd6f4]">
-                  {progress.reduce((sum, p) => sum + p.totalAttempts, 0)}
+                  {totalActivities > 0 ? ((completedActivities / totalActivities) * 100).toFixed(0) : 0}%
                 </p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Activity Progress List */}
+        {/* Lab Sessions Progress */}
         <div className="bg-[#313244] border border-[#45475a] rounded-lg p-6">
-          <h2 className="text-xl font-bold text-[#cdd6f4] mb-6">Activity Details</h2>
+          <h2 className="text-xl font-bold text-[#cdd6f4] mb-6">Lab Sessions</h2>
           
-          {progress.length === 0 ? (
+          {sessions.length === 0 ? (
             <p className="text-center text-[#6c7086] py-8">
-              No activities attempted yet. Start coding to see your progress!
+              No lab sessions enrolled yet. Check back soon!
             </p>
           ) : (
             <div className="space-y-3">
-              {progress.map((item) => (
-                <div
-                  key={item.activity._id}
-                  className="border border-[#45475a] rounded-lg p-4 hover:border-[#585b70] transition cursor-pointer"
-                  onClick={() => navigate(`/student/activity/${item.activity._id}`)}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-medium text-[#cdd6f4] mb-1">
-                        {item.activity.title}
-                      </h3>
-                      <div className="flex items-center gap-3 text-sm text-[#bac2de]">
-                        <span>{item.activity.topic}</span>
-                        <span>•</span>
-                        <span>{item.activity.difficulty}</span>
-                        <span>•</span>
-                        <span className={`px-2 py-0.5 rounded text-xs ${
-                          item.activity.type === 'practice'
-                            ? 'bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1]'
-                            : 'bg-[#f38ba8] bg-opacity-20 text-[#f38ba8]'
-                        }`}>
-                          {item.activity.type}
+              {sessions.map((session) => {
+                const sessionActivities = session.activities || [];
+                const completedActivitiesCount = getCompletedActivitiesForSession(session);
+
+                return (
+                  <div
+                    key={session._id}
+                    className="border border-[#45475a] rounded-lg p-4 hover:border-[#585b70] transition cursor-pointer"
+                    onClick={() => navigate(`/student/session/${session._id}`)}
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <h3 className="font-medium text-[#cdd6f4] mb-1">
+                          {session.title}
+                        </h3>
+                        <p className="text-sm text-[#bac2de] mb-3">
+                          {session.description}
+                        </p>
+                        <div className="flex items-center gap-3 text-sm text-[#bac2de]">
+                          <span className="px-2 py-0.5 rounded text-xs bg-[#89b4fa] bg-opacity-20 text-[#89b4fa]">
+                            {sessionActivities.length} activities
+                          </span>
+                          <span>•</span>
+                          <span>
+                            {session.isActive ? '🔵 Active' : '⚫ Inactive'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {completedActivitiesCount === sessionActivities.length && sessionActivities.length > 0 ? (
+                          <CheckCircle className="w-5 h-5 text-[#a6e3a1]" />
+                        ) : (
+                          <Clock className="w-5 h-5 text-[#f9e2af]" />
+                        )}
+                        <span className="text-lg font-bold text-[#cdd6f4]">
+                          {completedActivitiesCount}/{sessionActivities.length}
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {item.status === 'completed' ? (
-                        <CheckCircle className="w-5 h-5 text-[#a6e3a1]" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-[#f38ba8]" />
-                      )}
-                      <span className="text-2xl font-bold text-[#cdd6f4]">
-                        {item.bestScore}%
-                      </span>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <p className="text-[#6c7086] mb-1">Attempts</p>
-                      <p className="text-[#cdd6f4] font-medium">{item.totalAttempts}</p>
-                    </div>
-                    <div>
-                      <p className="text-[#6c7086] mb-1">Status</p>
-                      <p className={`font-medium ${
-                        item.status === 'completed' ? 'text-[#a6e3a1]' :
-                        item.status === 'in_progress' ? 'text-[#f9e2af]' :
-                        'text-[#6c7086]'
-                      }`}>
-                        {item.status === 'completed' ? 'Completed' :
-                         item.status === 'in_progress' ? 'In Progress' :
-                         'Not Started'}
-                      </p>
+                    <div className="w-full bg-[#45475a] rounded-full h-2">
+                      <div
+                        className="bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] h-2 rounded-full transition-all duration-500"
+                        style={{ width: `${sessionActivities.length > 0 ? (completedActivitiesCount / sessionActivities.length) * 100 : 0}%` }}
+                      ></div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

@@ -14,10 +14,11 @@ function SubmissionHistory({ activityId, onViewCode }) {
   const fetchSubmissions = async () => {
     try {
       const response = await submissionAPI.getMySubmissions(activityId);
-      setSubmissions(response.data.data);
+      setSubmissions(response.data.data || []);
       setStats(response.data.stats);
     } catch (error) {
       console.error('Failed to fetch submissions:', error);
+      setSubmissions([]);
     } finally {
       setLoading(false);
     }
@@ -112,7 +113,7 @@ function SubmissionHistory({ activityId, onViewCode }) {
               </div>
             </div>
 
-            <div className="flex items-center gap-4 text-xs text-[#6c7086]">
+            <div className="flex items-center gap-4 text-xs text-[#6c7086] mb-2">
               <div className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 <span>{new Date(submission.createdAt).toLocaleString()}</span>
@@ -123,8 +124,22 @@ function SubmissionHistory({ activityId, onViewCode }) {
             </div>
 
             {submission.compileError && (
-              <div className="mt-2 text-xs text-[#f38ba8]">
-                Compile Error
+              <div className="mt-2 p-2 bg-[#f38ba8] bg-opacity-10 border border-[#f38ba8] border-opacity-20 rounded text-xs text-[#f38ba8]">
+                <p className="font-medium">Compile Error</p>
+                <p className="line-clamp-2">{submission.compileError.substring(0, 100)}</p>
+              </div>
+            )}
+
+            {submission.runtimeError && (
+              <div className="mt-2 p-2 bg-[#f38ba8] bg-opacity-10 border border-[#f38ba8] border-opacity-20 rounded text-xs text-[#f38ba8]">
+                <p className="font-medium">Runtime Error</p>
+                <p className="line-clamp-2">{submission.runtimeError.substring(0, 100)}</p>
+              </div>
+            )}
+
+            {submission.testExecutionLog && submission.testExecutionLog.length > 0 && (
+              <div className="mt-2 text-xs text-[#89b4fa]">
+                Test Log: {submission.testExecutionLog.length} steps
               </div>
             )}
           </div>

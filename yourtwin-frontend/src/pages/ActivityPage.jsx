@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { activityAPI } from '../services/api';
-import axios from 'axios';
+import { activityAPI, submissionAPI } from '../services/api';
 import CodeEditor from '../components/CodeEditor';
+import TestExecutionViewer from '../components/TestExecutionViewer';
 import { 
   ArrowLeft, 
   CheckCircle, 
@@ -18,6 +18,7 @@ function ActivityPage() {
   const { activityId } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [labSessionId, setLabSessionId] = useState(null);
 
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -35,6 +36,14 @@ function ActivityPage() {
     try {
       const response = await activityAPI.getOne(activityId);
       setActivity(response.data.data);
+      // Store the lab session ID for navigation
+      // Handle both populated object and string ID
+      if (response.data.data.labSession) {
+        const sessionId = typeof response.data.data.labSession === 'object'
+          ? response.data.data.labSession._id
+          : response.data.data.labSession;
+        setLabSessionId(sessionId);
+      }
     } catch (error) {
       console.error('Failed to fetch activity:', error);
     } finally {
@@ -48,19 +57,12 @@ function ActivityPage() {
     setActiveTab('results');
 
     try {
-      const response = await axios.post(
-        'http://localhost:5000/api/submissions',
-        {
-          activityId: activity._id,
-          code: code,
-          language: activity.language
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
+      const response = await submissionAPI.submit({
+        activityId: activity._id,
+        code: code,
+        language: activity.language,
+        labSessionId: labSessionId // Include lab session ID for proper association
+      });
 
       setResults(response.data.data);
     } catch (error) {
@@ -105,10 +107,28 @@ function ActivityPage() {
         <div className="text-center">
           <h2 className="text-2xl font-bold text-[#f38ba8] mb-4">Activity Not Found</h2>
           <button
-            onClick={() => navigate('/student/dashboard')}
+            onClick={() => navigate(labSessionId ? `/student/session/${labSessionId}` : '/student/dashboard')}
             className="text-[#89b4fa] hover:text-[#a6e3a1] transition"
           >
-            Return to Dashboard
+            Return to {labSessionId ? 'Session' : 'Dashboard'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Check if activity is deactivated
+  if (activity.isActive === false) {
+    return (
+      <div className="min-h-screen bg-[#1e1e2e] flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-[#f9e2af] mb-4">Activity Not Available</h2>
+          <p className="text-[#bac2de] mb-6">This activity has been deactivated by the instructor.</p>
+          <button
+            onClick={() => navigate(labSessionId ? `/student/session/${labSessionId}` : '/student/dashboard')}
+            className="px-6 py-2 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] font-medium rounded-lg transition"
+          >
+            Return to {labSessionId ? 'Session' : 'Dashboard'}
           </button>
         </div>
       </div>
@@ -122,7 +142,7 @@ function ActivityPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => navigate('/student/dashboard')}
+              onClick={() => navigate(labSessionId ? `/student/session/${labSessionId}` : '/student/dashboard')}
               className="p-2 hover:bg-[#45475a] rounded-lg transition"
             >
               <ArrowLeft className="w-5 h-5 text-[#bac2de]" />
@@ -313,86 +333,14 @@ function ResultsTab({ results, isRunning }) {
     );
   }
 
-  const passedCount = results.testResults.filter(r => r.passed).length;
-  const totalCount = results.testResults.length;
-
+  // Use TestExecutionViewer component
   return (
-    <div className="space-y-4">
-      {/* Summary */}
-      <div className={`rounded-lg p-4 border ${
-        results.status === 'passed'
-          ? 'bg-[#a6e3a1] bg-opacity-10 border-[#a6e3a1] border-opacity-30'
-          : 'bg-[#f38ba8] bg-opacity-10 border-[#f38ba8] border-opacity-30'
-      }`}>
-        <div className="flex items-center gap-3 mb-2">
-          {results.status === 'passed' ? (
-            <CheckCircle className="w-6 h-6 text-[#a6e3a1]" />
-          ) : (
-            <XCircle className="w-6 h-6 text-[#f38ba8]" />
-          )}
-          <div>
-            <p className={`font-bold ${
-              results.status === 'passed' ? 'text-[#a6e3a1]' : 'text-[#f38ba8]'
-            }`}>
-              {results.status === 'passed' ? 'All Tests Passed!' : 'Some Tests Failed'}
-            </p>
-            <p className="text-sm text-[#bac2de]">
-              {passedCount}/{totalCount} test cases passed • Score: {results.score}%
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Test Results */}
-      <div className="space-y-3">
-        {results.testResults.map((result, index) => (
-          <div
-            key={index}
-            className={`border rounded-lg p-4 ${
-              result.passed
-                ? 'bg-[#a6e3a1] bg-opacity-5 border-[#a6e3a1] border-opacity-20'
-                : 'bg-[#f38ba8] bg-opacity-5 border-[#f38ba8] border-opacity-20'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-[#cdd6f4]">
-                Test Case {index + 1}
-              </span>
-              <span className={`text-xs px-2 py-1 rounded ${
-                result.passed
-                  ? 'bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1]'
-                  : 'bg-[#f38ba8] bg-opacity-20 text-[#f38ba8]'
-              }`}>
-                {result.passed ? 'Passed' : 'Failed'}
-              </span>
-            </div>
-
-            {!result.passed && (
-              <>
-                <div className="mb-2">
-                  <p className="text-xs text-[#6c7086] mb-1">Expected:</p>
-                  <pre className="text-xs text-[#cdd6f4] bg-[#1e1e2e] p-2 rounded">
-                    {result.expectedOutput}
-                  </pre>
-                </div>
-                <div>
-                  <p className="text-xs text-[#6c7086] mb-1">Your Output:</p>
-                  <pre className="text-xs text-[#f38ba8] bg-[#1e1e2e] p-2 rounded">
-                    {result.actualOutput || '(no output)'}
-                  </pre>
-                </div>
-              </>
-            )}
-
-            {result.executionTime && (
-              <p className="text-xs text-[#6c7086] mt-2">
-                Execution time: {result.executionTime}s
-              </p>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+    <TestExecutionViewer
+      testLog={results.testExecutionLog || []}
+      compileError={results.compileError}
+      runtimeError={results.runtimeError}
+      isRunning={isRunning}
+    />
   );
 }
 

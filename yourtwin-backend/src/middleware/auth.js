@@ -35,6 +35,7 @@ export const authenticate = async (req, res, next) => {
     
     // Attach user to request
     req.user = user;
+    console.log(`✅ [Auth] User authenticated: ${user.email} (Role: ${user.role}, ID: ${user._id})`);
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
@@ -54,12 +55,15 @@ export const authenticate = async (req, res, next) => {
 // Authorize specific roles
 export const authorize = (...roles) => {
   return (req, res, next) => {
+    console.log(`🔐 [Authorization Check] User: ${req.user.email}, Role: ${req.user.role}, Required Roles: ${roles.join(', ')}`);
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ 
+      console.log(`❌ [Authorization Failed] User role '${req.user.role}' not in allowed roles: ${roles.join(', ')}`);
+      return res.status(403).json({
         success: false,
-        message: `User role '${req.user.role}' is not authorized to access this route` 
+        message: `User role '${req.user.role}' is not authorized to access this route`
       });
     }
+    console.log(`✅ [Authorization Success] User ${req.user.email} authorized`);
     next();
   };
 };
