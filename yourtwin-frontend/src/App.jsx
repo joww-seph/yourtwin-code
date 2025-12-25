@@ -2,9 +2,12 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import AutoLogoutWrapper from './components/AutoLogoutWrapper';
 
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 
 // Student pages
 import StudentDashboard from './pages/StudentDashboard';
@@ -19,18 +22,22 @@ import InstructorDashboard from './pages/InstructorDashboard';
 import LabSessionsPage from './pages/LabSessionsPage';
 import LabSessionDetailPage from './pages/LabSessionDetailPage';
 import CreateEditLabSession from './pages/CreateEditLabSession';
+import AnalyticsDashboard from './pages/AnalyticsDashboard';
 
 function App() {
   return (
     <AuthProvider>
       <SocketProvider>
-        <Router>
-          <Routes>
+        <AutoLogoutWrapper>
+          <Router>
+            <Routes>
 
           {/* ---------- Public ---------- */}
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password/:token" element={<ResetPassword />} />
 
           {/* ---------- Student Routes ---------- */}
           <Route
@@ -151,6 +158,15 @@ function App() {
             }
           />
 
+          <Route
+            path="/instructor/analytics"
+            element={
+              <ProtectedRoute allowedRoles={['instructor']}>
+                <AnalyticsDashboard />
+              </ProtectedRoute>
+            }
+          />
+
           {/* ---------- Unauthorized ---------- */}
           <Route
             path="/unauthorized"
@@ -186,8 +202,9 @@ function App() {
             }
           />
 
-        </Routes>
-        </Router>
+            </Routes>
+          </Router>
+        </AutoLogoutWrapper>
       </SocketProvider>
     </AuthProvider>
   );

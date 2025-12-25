@@ -9,6 +9,17 @@ let io = null;
 // Store active processes for each socket
 const activeProcesses = new Map();
 
+// Track online users by role
+const onlineUsers = {
+  students: new Map(), // Map<socketId, { userId, sessionId }>
+  instructors: new Map()
+};
+
+// Get online students count
+export const getOnlineStudentsCount = () => onlineUsers.students.size;
+export const getOnlineInstructorsCount = () => onlineUsers.instructors.size;
+export const getOnlineStudentsList = () => Array.from(onlineUsers.students.values());
+
 // Find executable on Windows by checking common paths
 function findExecutable(name, commonPaths = []) {
   // Check environment variable override first (e.g., GPP_PATH, JAVAC_PATH, PYTHON_PATH)
@@ -111,14 +122,18 @@ export const initializeSocket = (socketIO) => {
 
     // Join room based on role and userId
     socket.on('join-room', (data) => {
-      const { userId, role } = data;
+      const { userId, role, userName } = data;
       if (role === 'student') {
         socket.join(`student-${userId}`);
+        onlineUsers.students.set(socket.id, { socketId: socket.id, userId, userName, joinedAt: new Date() });
+        // Notify instructors about student count update
+        broadcastOnlineCount();
       } else if (role === 'instructor') {
         socket.join(`instructor-${userId}`);
+        onlineUsers.instructors.set(socket.id, { socketId: socket.id, userId, userName, joinedAt: new Date() });
       }
       socket.join(`role-${role}`);
-      console.log(`User ${userId} joined ${role} room`);
+      console.log(`User ${userId} (${userName || 'Unknown'}) joined ${role} room. Online: ${onlineUsers.students.size} students, ${onlineUsers.instructors.size} instructors`);
     });
 
     // Join specific lab session room
@@ -180,9 +195,32 @@ export const initializeSocket = (socketIO) => {
         proc.kill('SIGTERM');
         activeProcesses.delete(socket.id);
       }
+      // Remove from online users tracking
+      const wasStudent = onlineUsers.students.has(socket.id);
+      onlineUsers.students.delete(socket.id);
+      onlineUsers.instructors.delete(socket.id);
+      // Notify instructors if a student disconnected
+      if (wasStudent) {
+        broadcastOnlineCount();
+      }
     });
   });
 };
+
+// Broadcast online count to all instructors
+function broadcastOnlineCount() {
+  if (io) {
+    io.to('role-instructor').emit('online-count-update', {
+      studentsOnline: onlineUsers.students.size,
+      instructorsOnline: onlineUsers.instructors.size,
+      students: Array.from(onlineUsers.students.values()).map(s => ({
+        userId: s.userId,
+        userName: s.userName,
+        joinedAt: s.joinedAt
+      }))
+    });
+  }
+}
 
 // Run code interactively with streaming I/O
 async function runCodeInteractive(socket, code, language) {

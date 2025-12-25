@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import StudentSelector from '../components/StudentSelector';
 import CreateActivityModal from '../components/CreateActivityModal';
+import StudentProgressPanel from '../components/StudentProgressPanel';
 import { labSessionAPI, studentAPI, activityAPI } from '../services/api';
 import { showSuccess, showError, showDeleteConfirm } from '../utils/sweetalert';
 import {
@@ -22,8 +23,11 @@ import {
   User,
   Edit3,
   Copy,
-  AlertTriangle
+  AlertTriangle,
+  BarChart3,
+  Shield
 } from 'lucide-react';
+import PlagiarismReport from '../components/PlagiarismReport';
 
 function LabSessionDetailPage() {
   const { sessionId } = useParams();
@@ -43,6 +47,7 @@ function LabSessionDetailPage() {
   const [editingActivity, setEditingActivity] = useState(null);
   const [activityModalMode, setActivityModalMode] = useState('create');
   const [deletingSession, setDeletingSession] = useState(false);
+  const [plagiarismActivity, setPlagiarismActivity] = useState(null);
 
   useEffect(() => {
     fetchSessionDetails();
@@ -440,6 +445,17 @@ function LabSessionDetailPage() {
             Students ({allowedStudents.length})
           </button>
           <button
+            onClick={() => setActiveTab('progress')}
+            className={`px-4 py-3 border-b-2 font-medium transition ${
+              activeTab === 'progress'
+                ? 'border-[#89b4fa] text-[#89b4fa]'
+                : 'border-transparent text-[#bac2de] hover:text-[#cdd6f4]'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4 inline mr-2" />
+            Progress
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             className={`px-4 py-3 border-b-2 font-medium transition ${
               activeTab === 'settings'
@@ -587,6 +603,16 @@ function LabSessionDetailPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          setPlagiarismActivity(activity);
+                        }}
+                        className="p-2 hover:bg-[#45475a] text-[#cba6f7] rounded-lg transition"
+                        title="Check plagiarism"
+                      >
+                        <Shield className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
                           handleDeleteActivity(activity._id);
                         }}
                         className="p-2 hover:bg-[#45475a] text-[#f38ba8] rounded-lg transition"
@@ -600,6 +626,15 @@ function LabSessionDetailPage() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Plagiarism Report Modal */}
+        {plagiarismActivity && (
+          <PlagiarismReport
+            activityId={plagiarismActivity._id}
+            activityTitle={plagiarismActivity.title}
+            onClose={() => setPlagiarismActivity(null)}
+          />
         )}
 
         {/* Students Tab */}
@@ -679,6 +714,11 @@ function LabSessionDetailPage() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Progress Tab */}
+        {activeTab === 'progress' && (
+          <StudentProgressPanel sessionId={sessionId} />
         )}
 
         {/* Settings Tab */}

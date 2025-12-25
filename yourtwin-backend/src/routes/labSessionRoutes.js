@@ -9,7 +9,9 @@ import {
   deactivateLabSession,
   getAvailableStudents,
   addStudentsToSession,
-  removeStudentFromSession
+  removeStudentFromSession,
+  getSessionProgress,
+  getActivityProgress
 } from '../controllers/labSessionController.js';
 import { createActivity, getSessionActivities } from '../controllers/activityController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
@@ -44,5 +46,9 @@ const passSessionId = (req, res, next) => {
 // Activity management within sessions
 router.post('/:id/activities', authorize('instructor', 'admin'), passSessionId, createActivity);
 router.get('/:id/activities', passSessionId, getSessionActivities);
+
+// Progress tracking (instructor only)
+router.get('/:id/progress', authorize('instructor', 'admin'), getSessionProgress);
+router.get('/:id/activities/:activityId/progress', authorize('instructor', 'admin'), getActivityProgress);
 
 export default router;

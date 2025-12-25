@@ -51,6 +51,15 @@ const userSchema = new mongoose.Schema({
   profileImage: {
     type: String,
     default: null
+  },
+  // Password reset fields
+  passwordResetToken: {
+    type: String,
+    select: false
+  },
+  passwordResetExpires: {
+    type: Date,
+    select: false
   }
 }, {
   timestamps: true
@@ -88,8 +97,8 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Method to generate JWT token
-userSchema.methods.generateAuthToken = function() {
+// Method to generate JWT token (rememberMe extends to 30 days)
+userSchema.methods.generateAuthToken = function(rememberMe = false) {
   return jwt.sign(
     {
       userId: this._id,
@@ -97,8 +106,25 @@ userSchema.methods.generateAuthToken = function() {
       role: this.role
     },
     process.env.JWT_SECRET,
-    { expiresIn: '24h' }
+    { expiresIn: rememberMe ? '30d' : '24h' }
   );
+};
+
+// Method to generate password reset token
+userSchema.methods.generatePasswordResetToken = function() {
+  const crypto = require('crypto');
+  const resetToken = crypto.randomBytes(32).toString('hex');
+
+  // Hash the token and store it
+  this.passwordResetToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+
+  // Token expires in 1 hour
+  this.passwordResetExpires = Date.now() + 60 * 60 * 1000;
+
+  return resetToken;
 };
 
 // Indexes (email already has unique: true which creates an index)

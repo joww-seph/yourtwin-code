@@ -5,7 +5,9 @@ import TestResult from '../models/TestResult.js';
 import Student from '../models/Student.js';
 import StudentTwin from '../models/StudentTwin.js';
 import StudentCompetency from '../models/StudentCompetency.js';
+import LabSession from '../models/LabSession.js';
 import { runTestCases, executeCode, LANGUAGE_IDS } from '../services/judge0Service.js';
+import { emitToLabSession, emitToUser, emitToAllInstructors } from '../utils/socket.js';
 
 // @desc    Submit code for an activity
 // @route   POST /api/submissions
@@ -161,6 +163,36 @@ export const submitCode = async (req, res) => {
 
     // Populate activity details
     await submission.populate('activityId', 'title topic difficulty');
+
+    // Emit real-time socket events for progress tracking
+    const submissionEvent = {
+      submissionId: submission._id,
+      studentId: studentProfile._id,
+      studentName: `${req.user.firstName} ${req.user.lastName}`,
+      activityId: activity._id,
+      activityTitle: activity.title,
+      labSessionId: activity.labSession,
+      score,
+      status,
+      attemptNumber: submission.attemptNumber,
+      passedTests,
+      totalTests: testCases.length,
+      timestamp: new Date()
+    };
+
+    // Emit to lab session room (instructors monitoring this session will see)
+    emitToLabSession(activity.labSession, 'submission-created', submissionEvent);
+
+    // Emit to ALL instructors (for analytics dashboard)
+    emitToAllInstructors('submission-created', submissionEvent);
+
+    // Emit to student's personal room (for their dashboard updates)
+    emitToUser(req.user._id, 'my-submission-result', {
+      ...submissionEvent,
+      testExecutionLog
+    });
+
+    console.log(`📡 [Socket] Submission event emitted for ${req.user.firstName} - Activity: ${activity.title} - Score: ${score}%`);
 
     res.status(201).json({
       success: true,
@@ -358,6 +390,190 @@ export const compareSubmissions = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to compare submissions',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get comprehensive student stats for dashboard
+// @route   GET /api/submissions/stats
+export const getStudentStats = async (req, res) => {
+  try {
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    if (!studentProfile) {
+      return res.json({
+        success: true,
+        data: {
+          overview: { totalSubmissions: 0, passedActivities: 0, avgScore: 0, totalActivities: 0 },
+          recentSubmissions: [],
+          activityStats: [],
+          streakData: { currentStreak: 0, longestStreak: 0, lastActivity: null },
+          weeklyActivity: []
+        }
+      });
+    }
+
+    // Get all submissions with activity details
+    const submissions = await Submission.find({ studentId: studentProfile._id })
+      .populate('activityId', 'title topic difficulty type labSession')
+      .sort({ createdAt: -1 });
+
+    // Overview stats
+    const uniqueActivities = [...new Set(submissions.map(s => s.activityId?._id?.toString()).filter(Boolean))];
+    const passedActivities = [...new Set(
+      submissions.filter(s => s.status === 'passed').map(s => s.activityId?._id?.toString()).filter(Boolean)
+    )];
+
+    const overview = {
+      totalSubmissions: submissions.length,
+      totalActivities: uniqueActivities.length,
+      passedActivities: passedActivities.length,
+      avgScore: submissions.length > 0
+        ? Math.round(submissions.reduce((sum, s) => sum + s.score, 0) / submissions.length)
+        : 0,
+      passRate: uniqueActivities.length > 0
+        ? Math.round((passedActivities.length / uniqueActivities.length) * 100)
+        : 0
+    };
+
+    // Recent submissions (last 10)
+    const recentSubmissions = submissions.slice(0, 10).map(s => ({
+      _id: s._id,
+      activityTitle: s.activityId?.title || 'Unknown',
+      activityTopic: s.activityId?.topic || 'Unknown',
+      score: s.score,
+      status: s.status,
+      attemptNumber: s.attemptNumber,
+      createdAt: s.createdAt
+    }));
+
+    // Per-activity stats (best scores)
+    const activityMap = new Map();
+    submissions.forEach(s => {
+      if (!s.activityId) return;
+      const actId = s.activityId._id.toString();
+      if (!activityMap.has(actId)) {
+        activityMap.set(actId, {
+          activityId: actId,
+          title: s.activityId.title,
+          topic: s.activityId.topic,
+          difficulty: s.activityId.difficulty,
+          type: s.activityId.type,
+          bestScore: s.score,
+          attempts: 1,
+          passed: s.status === 'passed',
+          lastAttempt: s.createdAt
+        });
+      } else {
+        const existing = activityMap.get(actId);
+        existing.attempts++;
+        if (s.score > existing.bestScore) existing.bestScore = s.score;
+        if (s.status === 'passed') existing.passed = true;
+        if (s.createdAt > existing.lastAttempt) existing.lastAttempt = s.createdAt;
+      }
+    });
+    const activityStats = Array.from(activityMap.values()).slice(0, 20);
+
+    // Streak calculation (consecutive days with submissions)
+    const submissionDates = submissions.map(s => new Date(s.createdAt).toDateString());
+    const uniqueDates = [...new Set(submissionDates)].sort((a, b) => new Date(b) - new Date(a));
+
+    let currentStreak = 0;
+    let longestStreak = 0;
+    let tempStreak = 0;
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+    if (uniqueDates.length > 0) {
+      // Check if today or yesterday has a submission
+      if (uniqueDates[0] === today || uniqueDates[0] === yesterday) {
+        currentStreak = 1;
+        for (let i = 1; i < uniqueDates.length; i++) {
+          const prevDate = new Date(uniqueDates[i - 1]);
+          const currDate = new Date(uniqueDates[i]);
+          const diffDays = Math.round((prevDate - currDate) / 86400000);
+          if (diffDays === 1) {
+            currentStreak++;
+          } else {
+            break;
+          }
+        }
+      }
+
+      // Calculate longest streak
+      for (let i = 0; i < uniqueDates.length; i++) {
+        if (i === 0) {
+          tempStreak = 1;
+        } else {
+          const prevDate = new Date(uniqueDates[i - 1]);
+          const currDate = new Date(uniqueDates[i]);
+          const diffDays = Math.round((prevDate - currDate) / 86400000);
+          if (diffDays === 1) {
+            tempStreak++;
+          } else {
+            longestStreak = Math.max(longestStreak, tempStreak);
+            tempStreak = 1;
+          }
+        }
+      }
+      longestStreak = Math.max(longestStreak, tempStreak);
+    }
+
+    // Weekly activity (last 7 days)
+    const weeklyActivity = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toDateString();
+      const daySubmissions = submissions.filter(s => new Date(s.createdAt).toDateString() === dateStr);
+      weeklyActivity.push({
+        date: date.toISOString().split('T')[0],
+        day: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        submissions: daySubmissions.length,
+        passed: daySubmissions.filter(s => s.status === 'passed').length
+      });
+    }
+
+    // Topic performance
+    const topicMap = new Map();
+    submissions.forEach(s => {
+      if (!s.activityId?.topic) return;
+      const topic = s.activityId.topic;
+      if (!topicMap.has(topic)) {
+        topicMap.set(topic, { topic, attempts: 0, passed: 0, totalScore: 0 });
+      }
+      const existing = topicMap.get(topic);
+      existing.attempts++;
+      existing.totalScore += s.score;
+      if (s.status === 'passed') existing.passed++;
+    });
+    const topicPerformance = Array.from(topicMap.values()).map(t => ({
+      topic: t.topic,
+      attempts: t.attempts,
+      passRate: t.attempts > 0 ? Math.round((t.passed / t.attempts) * 100) : 0,
+      avgScore: t.attempts > 0 ? Math.round(t.totalScore / t.attempts) : 0
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        overview,
+        recentSubmissions,
+        activityStats,
+        streakData: {
+          currentStreak,
+          longestStreak,
+          lastActivity: submissions[0]?.createdAt || null
+        },
+        weeklyActivity,
+        topicPerformance
+      }
+    });
+  } catch (error) {
+    console.error('Get student stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student stats',
       error: error.message
     });
   }

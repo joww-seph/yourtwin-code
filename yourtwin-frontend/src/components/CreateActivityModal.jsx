@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
+import { X, Plus, Trash2, Eye, EyeOff, Bot, Lock, HelpCircle } from 'lucide-react';
 import { showWarning } from '../utils/sweetalert';
+
+// AI Assistance Level definitions
+const AI_LEVELS = [
+  { level: 0, name: 'Lockdown', desc: 'No AI help - Assessment mode', color: '#f38ba8', icon: Lock },
+  { level: 1, name: 'Questions', desc: 'Socratic guiding questions only', color: '#fab387' },
+  { level: 2, name: 'Concepts', desc: 'Algorithm/data structure hints', color: '#f9e2af' },
+  { level: 3, name: 'Pseudocode', desc: 'Step-by-step logic guidance', color: '#a6e3a1' },
+  { level: 4, name: 'Examples', desc: 'Similar problem patterns', color: '#89b4fa' },
+  { level: 5, name: 'Guided', desc: 'Detailed help with code hints', color: '#cba6f7' }
+];
 
 function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initialData = null, mode = 'create' }) {
   const [activeTab, setActiveTab] = useState('basic');
@@ -17,6 +27,7 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
     type: 'practice',
     language: 'python',
     timeLimit: 30,
+    aiAssistanceLevel: 5,
     testCases: []
   });
 
@@ -40,6 +51,7 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
           type: initialData.type || 'practice',
           language: initialData.language || 'python',
           timeLimit: initialData.timeLimit || 30,
+          aiAssistanceLevel: initialData.aiAssistanceLevel ?? 5,
           testCases: initialData.testCases ? initialData.testCases.map(tc => ({
             input: tc.input || '',
             expectedOutput: tc.expectedOutput || '',
@@ -125,6 +137,7 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
       type: 'practice',
       language: 'python',
       timeLimit: 30,
+      aiAssistanceLevel: 5,
       testCases: []
     });
     setCurrentTestCase({
@@ -300,6 +313,75 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
                   />
                 </div>
               </div>
+
+              {/* AI Assistance Level Selector */}
+              <div className="mt-6 pt-4 border-t border-[#45475a]">
+                <div className="flex items-center gap-2 mb-3">
+                  <Bot className="w-5 h-5 text-[#cba6f7]" />
+                  <label className="text-sm font-medium text-[#cdd6f4]">
+                    AI Assistance Level
+                  </label>
+                  <div className="group relative">
+                    <HelpCircle className="w-4 h-4 text-[#6c7086] cursor-help" />
+                    <div className="absolute left-0 bottom-full mb-2 w-64 p-3 bg-[#1e1e2e] border border-[#45475a] rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                      <p className="text-xs text-[#bac2de]">
+                        Controls the maximum level of AI help students can request.
+                        Lower levels promote independent problem-solving.
+                        Level 0 (Lockdown) disables AI completely for assessments.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-6 gap-2">
+                  {AI_LEVELS.map(({ level, name, desc, color, icon: Icon }) => {
+                    const isSelected = formData.aiAssistanceLevel === level;
+                    return (
+                      <button
+                        key={level}
+                        type="button"
+                        onClick={() => handleInputChange('aiAssistanceLevel', level)}
+                        className={`relative p-3 rounded-lg border-2 transition-all ${
+                          isSelected
+                            ? 'border-opacity-100 bg-opacity-20'
+                            : 'border-[#45475a] hover:border-opacity-50 bg-transparent'
+                        }`}
+                        style={{
+                          borderColor: isSelected ? color : undefined,
+                          backgroundColor: isSelected ? `${color}20` : undefined
+                        }}
+                      >
+                        <div className="flex flex-col items-center gap-1">
+                          {Icon ? (
+                            <Icon className="w-5 h-5" style={{ color }} />
+                          ) : (
+                            <span className="text-lg font-bold" style={{ color }}>{level}</span>
+                          )}
+                          <span className="text-xs font-medium text-[#cdd6f4]">{name}</span>
+                        </div>
+                        {isSelected && (
+                          <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#a6e3a1]" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Selected level description */}
+                <div className="mt-3 p-3 rounded-lg" style={{
+                  backgroundColor: `${AI_LEVELS[formData.aiAssistanceLevel]?.color}15`
+                }}>
+                  <p className="text-sm" style={{ color: AI_LEVELS[formData.aiAssistanceLevel]?.color }}>
+                    <span className="font-medium">Level {formData.aiAssistanceLevel}:</span>{' '}
+                    {AI_LEVELS[formData.aiAssistanceLevel]?.desc}
+                  </p>
+                  {formData.aiAssistanceLevel === 0 && (
+                    <p className="text-xs text-[#f38ba8] mt-1">
+                      Students will not be able to use Shadow Twin AI assistance during this activity.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -439,6 +521,19 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
                   </span>
                   <span className="px-2 py-1 bg-[#bac2de] bg-opacity-20 text-[#bac2de] text-xs rounded">
                     {formData.timeLimit} min
+                  </span>
+                  <span
+                    className="px-2 py-1 text-xs rounded flex items-center gap-1"
+                    style={{
+                      backgroundColor: `${AI_LEVELS[formData.aiAssistanceLevel]?.color}20`,
+                      color: AI_LEVELS[formData.aiAssistanceLevel]?.color
+                    }}
+                  >
+                    {formData.aiAssistanceLevel === 0 ? (
+                      <><Lock className="w-3 h-3" /> Lockdown</>
+                    ) : (
+                      <>AI Lv.{formData.aiAssistanceLevel}</>
+                    )}
                   </span>
                 </div>
 

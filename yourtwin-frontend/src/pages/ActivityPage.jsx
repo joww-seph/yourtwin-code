@@ -1,32 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { activityAPI, submissionAPI } from '../services/api';
 import CodeEditor from '../components/CodeEditor';
 import TestExecutionViewer from '../components/TestExecutionViewer';
-import { 
-  ArrowLeft, 
-  CheckCircle, 
-  XCircle, 
-  Clock, 
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  Clock,
   Terminal,
   FileText
 } from 'lucide-react';
 import SubmissionHistory from '../components/SubmissionHistory';
 
+// Shadow Twin imports
+import { ShadowTwinProvider, useShadowTwin } from '../contexts/ShadowTwinContext';
+import ShadowTwinButton from '../components/ShadowTwinButton';
+import HintPanel from '../components/HintPanel';
+
+// Main wrapper component - fetches activity data
 function ActivityPage() {
   const { activityId } = useParams();
-  const { user } = useAuth();
   const navigate = useNavigate();
-  const [labSessionId, setLabSessionId] = useState(null);
-
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState(null);
-  const [activeTab, setActiveTab] = useState('problem');
-  const [viewingSubmission, setViewingSubmission] = useState(null);
-  const [showHistory, setShowHistory] = useState(false);
+  const [labSessionId, setLabSessionId] = useState(null);
 
   useEffect(() => {
     fetchActivity();
@@ -36,8 +35,6 @@ function ActivityPage() {
     try {
       const response = await activityAPI.getOne(activityId);
       setActivity(response.data.data);
-      // Store the lab session ID for navigation
-      // Handle both populated object and string ID
       if (response.data.data.labSession) {
         const sessionId = typeof response.data.data.labSession === 'object'
           ? response.data.data.labSession._id
@@ -49,48 +46,6 @@ function ActivityPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleRunCode = async (code) => {
-    setIsRunning(true);
-    setResults(null);
-    setActiveTab('results');
-
-    try {
-      const response = await submissionAPI.submit({
-        activityId: activity._id,
-        code: code,
-        language: activity.language,
-        labSessionId: labSessionId // Include lab session ID for proper association
-      });
-
-      setResults(response.data.data);
-    } catch (error) {
-      console.error('Submission error:', error);
-      setResults({
-        error: true,
-        message: error.response?.data?.message || 'Submission failed'
-      });
-    } finally {
-      setIsRunning(false);
-    }
-  };
-
-  const getDisplayName = (user) => {
-    if (!user) return '';
-
-    // Preferred explicit display name
-    if (user.displayName) return user.displayName;
-
-    // First + Last
-    if (user.firstName || user.lastName) {
-      return `${user.firstName || ''} ${user.lastName || ''}`.trim();
-    }
-
-    // Legacy fallback
-    if (user.name) return user.name;
-
-    return 'Student';
   };
 
   if (loading) {
@@ -117,7 +72,6 @@ function ActivityPage() {
     );
   }
 
-  // Check if activity is deactivated
   if (activity.isActive === false) {
     return (
       <div className="min-h-screen bg-[#1e1e2e] flex items-center justify-center">
@@ -134,6 +88,104 @@ function ActivityPage() {
       </div>
     );
   }
+
+  // Wrap with ShadowTwinProvider
+  return (
+    <ShadowTwinProvider
+      activityId={activityId}
+      aiAssistanceLevel={activity.aiAssistanceLevel ?? 5}
+    >
+      <ActivityPageContent activity={activity} labSessionId={labSessionId} />
+    </ShadowTwinProvider>
+  );
+}
+
+// Inner component with Shadow Twin integration
+function ActivityPageContent({ activity, labSessionId }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const [isRunning, setIsRunning] = useState(false);
+  const [results, setResults] = useState(null);
+  const [activeTab, setActiveTab] = useState('problem');
+  const [viewingSubmission, setViewingSubmission] = useState(null);
+
+  // Track current code and error for Shadow Twin
+  const [currentCode, setCurrentCode] = useState(activity?.starterCode || '');
+  const [lastError, setLastError] = useState('');
+
+  // Time tracking for Shadow Twin
+  const startTimeRef = useRef(Date.now());
+  const { updateTimeSpent, fetchHintHistory, fetchRecommendedLevel } = useShadowTwin();
+
+  // Update time spent periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      updateTimeSpent(elapsed);
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [updateTimeSpent]);
+
+  // Fetch hint data on mount
+  useEffect(() => {
+    fetchHintHistory();
+    fetchRecommendedLevel(0);
+  }, [fetchHintHistory, fetchRecommendedLevel]);
+
+  const handleRunCode = async (code) => {
+    setCurrentCode(code);
+    setIsRunning(true);
+    setResults(null);
+    setActiveTab('results');
+
+    try {
+      const response = await submissionAPI.submit({
+        activityId: activity._id,
+        code: code,
+        language: activity.language,
+        labSessionId: labSessionId
+      });
+
+      setResults(response.data.data);
+
+      // Track error for Shadow Twin hints
+      const result = response.data.data;
+      if (result.compileError) {
+        setLastError(result.compileError);
+      } else if (result.runtimeError) {
+        setLastError(result.runtimeError);
+      } else if (result.status === 'failed') {
+        const failedTest = result.testExecutionLog?.find(t => !t.passed);
+        setLastError(failedTest ? `Test failed: Expected "${failedTest.expected}" but got "${failedTest.actual}"` : 'Test cases failed');
+      } else {
+        setLastError('');
+      }
+
+      // Update recommended level based on new attempt
+      fetchRecommendedLevel(1);
+    } catch (error) {
+      console.error('Submission error:', error);
+      setResults({
+        error: true,
+        message: error.response?.data?.message || 'Submission failed'
+      });
+      setLastError(error.response?.data?.message || 'Submission failed');
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const getDisplayName = (user) => {
+    if (!user) return '';
+    if (user.displayName) return user.displayName;
+    if (user.firstName || user.lastName) {
+      return `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    }
+    if (user.name) return user.name;
+    return 'Student';
+  };
 
   return (
     <div className="min-h-screen bg-[#1e1e2e] flex flex-col">
@@ -161,6 +213,16 @@ function ActivityPage() {
                 }`}>
                   {activity.type}
                 </span>
+                {/* AI Assistance Level Indicator */}
+                {activity.aiAssistanceLevel === 0 ? (
+                  <span className="text-sm px-2 py-0.5 rounded bg-[#f38ba8] bg-opacity-20 text-[#f38ba8]">
+                    🔒 Lockdown
+                  </span>
+                ) : (
+                  <span className="text-sm px-2 py-0.5 rounded bg-[#cba6f7] bg-opacity-20 text-[#cba6f7]">
+                    AI Lv.{activity.aiAssistanceLevel}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -217,11 +279,10 @@ function ActivityPage() {
           {/* Tab Content */}
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === 'history' ? (
-              <SubmissionHistory 
-                activityId={activityId}
+              <SubmissionHistory
+                activityId={activity._id}
                 onViewCode={(submission) => {
                   setViewingSubmission(submission);
-                  // Optionally load the code into editor
                 }}
               />
             ) : activeTab === 'problem' ? (
@@ -242,6 +303,10 @@ function ActivityPage() {
           />
         </div>
       </div>
+
+      {/* Shadow Twin Components */}
+      <ShadowTwinButton />
+      <HintPanel code={currentCode} errorOutput={lastError} />
     </div>
   );
 }
@@ -250,13 +315,11 @@ function ActivityPage() {
 function ProblemTab({ activity }) {
   return (
     <div className="space-y-6">
-      {/* Description */}
       <div>
         <h2 className="text-lg font-bold text-[#cdd6f4] mb-3">Description</h2>
         <p className="text-[#bac2de] whitespace-pre-wrap">{activity.description}</p>
       </div>
 
-      {/* Test Cases */}
       <div>
         <h2 className="text-lg font-bold text-[#cdd6f4] mb-3">Test Cases</h2>
         <div className="space-y-3">
@@ -289,7 +352,6 @@ function ProblemTab({ activity }) {
         </div>
       </div>
 
-      {/* Time Limit */}
       <div className="flex items-center gap-2 text-sm text-[#bac2de]">
         <Clock className="w-4 h-4" />
         <span>Time Limit: {activity.timeLimit} minutes</span>
@@ -333,7 +395,6 @@ function ResultsTab({ results, isRunning }) {
     );
   }
 
-  // Use TestExecutionViewer component
   return (
     <TestExecutionViewer
       testLog={results.testExecutionLog || []}

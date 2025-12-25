@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Search, X, Users, Filter, ChevronDown, AlertCircle } from 'lucide-react';
+import { Search, X, Users, Filter, ChevronDown, Lock } from 'lucide-react';
 import { studentAPI } from '../services/api';
 
 function StudentSelector({
   onStudentsSelected,
   maxHeight = '400px',
   excludeStudentIds = [],
-  sessionInfo = null // { course, yearLevel, section } - to show target audience warning
+  sessionInfo = null // { course, yearLevel, section } - to auto-filter and show target audience
 }) {
   const [students, setStudents] = useState([]);
   const [filteredStudents, setFilteredStudents] = useState([]);
@@ -14,16 +14,30 @@ function StudentSelector({
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
-  
-  // Filter states
+
+  // Check if session has target audience restrictions
+  const hasTargetAudience = sessionInfo && (sessionInfo.course || sessionInfo.yearLevel || sessionInfo.section);
+
+  // Filter states - initialize with session target if available
   const [filters, setFilters] = useState({
-    course: '',
-    yearLevel: '',
-    section: ''
+    course: sessionInfo?.course || '',
+    yearLevel: sessionInfo?.yearLevel?.toString() || '',
+    section: sessionInfo?.section || ''
   });
   const [courses, setCourses] = useState([]);
   const [yearLevels, setYearLevels] = useState([]);
   const [sections, setSections] = useState([]);
+
+  // Update filters when sessionInfo changes
+  useEffect(() => {
+    if (sessionInfo) {
+      setFilters({
+        course: sessionInfo.course || '',
+        yearLevel: sessionInfo.yearLevel?.toString() || '',
+        section: sessionInfo.section || ''
+      });
+    }
+  }, [sessionInfo]);
 
   useEffect(() => {
     fetchStudents();
@@ -145,15 +159,17 @@ function StudentSelector({
     <div className="flex gap-6">
       {/* Left Panel - Student List */}
       <div className="flex-1">
-        {/* Session Target Audience Warning */}
-        {sessionInfo && (
-          <div className="mb-4 p-3 bg-[#f9e2af] bg-opacity-20 border border-[#f9e2af] border-opacity-30 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-[#f9e2af] flex-shrink-0 mt-0.5" />
+        {/* Session Target Audience Info - Auto-filtering applied */}
+        {hasTargetAudience && (
+          <div className="mb-4 p-3 bg-[#89b4fa] bg-opacity-20 border border-[#89b4fa] border-opacity-30 rounded-lg flex items-start gap-3">
+            <Filter className="w-5 h-5 text-[#89b4fa] flex-shrink-0 mt-0.5" />
             <div className="text-sm">
-              <p className="font-medium text-[#f9e2af]">Target Audience Restriction</p>
+              <p className="font-medium text-[#89b4fa]">Auto-filtered by Session Target</p>
               <p className="text-[#bac2de]">
-                This session is for <span className="font-medium text-[#cdd6f4]">{sessionInfo.course} {sessionInfo.yearLevel}-{sessionInfo.section}</span> students.
-                Only students matching this course/year/section can be enrolled.
+                Showing only <span className="font-medium text-[#cdd6f4]">{sessionInfo.course} {sessionInfo.yearLevel}-{sessionInfo.section}</span> students.
+                {filteredStudents.length === 0 && students.length > 0 && (
+                  <span className="text-[#f9e2af]"> No matching students found.</span>
+                )}
               </p>
             </div>
           </div>
@@ -176,15 +192,20 @@ function StudentSelector({
         {/* Filter Toggle and Controls */}
         <div className="mb-4 flex items-center justify-between">
           <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-2 px-3 py-2 bg-[#45475a] hover:bg-[#585b70] text-[#cdd6f4] rounded text-sm transition"
+            onClick={() => !hasTargetAudience && setShowFilters(!showFilters)}
+            disabled={hasTargetAudience}
+            className={`flex items-center gap-2 px-3 py-2 rounded text-sm transition ${
+              hasTargetAudience
+                ? 'bg-[#45475a] text-[#6c7086] cursor-not-allowed'
+                : 'bg-[#45475a] hover:bg-[#585b70] text-[#cdd6f4]'
+            }`}
           >
-            <Filter className="w-4 h-4" />
-            Filters
-            <ChevronDown className={`w-4 h-4 transition ${showFilters ? 'rotate-180' : ''}`} />
+            {hasTargetAudience ? <Lock className="w-4 h-4" /> : <Filter className="w-4 h-4" />}
+            {hasTargetAudience ? 'Filters Locked' : 'Filters'}
+            {!hasTargetAudience && <ChevronDown className={`w-4 h-4 transition ${showFilters ? 'rotate-180' : ''}`} />}
           </button>
 
-          {Object.values(filters).some(v => v) && (
+          {!hasTargetAudience && Object.values(filters).some(v => v) && (
             <button
               onClick={clearFilters}
               className="text-xs text-[#f38ba8] hover:text-[#f28482] transition"
@@ -194,8 +215,8 @@ function StudentSelector({
           )}
         </div>
 
-        {/* Filters Panel */}
-        {showFilters && (
+        {/* Filters Panel - Hidden when target audience is set */}
+        {showFilters && !hasTargetAudience && (
           <div className="bg-[#45475a] rounded p-4 mb-4 space-y-3">
             <div>
               <label className="text-xs text-[#bac2de] block mb-1">Course</label>

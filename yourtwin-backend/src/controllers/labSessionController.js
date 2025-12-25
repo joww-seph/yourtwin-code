@@ -4,6 +4,8 @@ import Student from '../models/Student.js';
 import User from '../models/User.js';
 import SessionEnrollment from '../models/SessionEnrollment.js';
 import TestCase from '../models/TestCase.js';
+import Submission from '../models/Submission.js';
+import HintRequest from '../models/HintRequest.js';
 import { emitToLabSession, emitToAllStudents, emitToAllInstructors, emitToUsers } from '../utils/socket.js';
 
 // Helper function to get enrolled students with user info
@@ -821,6 +823,282 @@ export const removeActivityFromSession = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to remove activity',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get session-wide student progress
+// @route   GET /api/lab-sessions/:id/progress
+export const getSessionProgress = async (req, res) => {
+  try {
+    const labSession = await LabSession.findById(req.params.id);
+
+    if (!labSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lab session not found'
+      });
+    }
+
+    // Check authorization (instructor only)
+    if (labSession.instructor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to view progress'
+      });
+    }
+
+    // Get enrolled students
+    const enrolledStudents = await getEnrolledStudentsWithUserInfo(labSession._id);
+
+    // Get activities
+    const activities = await Activity.find({ labSession: labSession._id, isActive: true })
+      .sort({ orderInSession: 1 });
+
+    // Get all submissions and hints for this session
+    const submissions = await Submission.find({ labSessionId: labSession._id });
+    const hints = await HintRequest.find({ activityId: { $in: activities.map(a => a._id) } });
+
+    // Build progress for each student
+    const studentProgress = await Promise.all(enrolledStudents.map(async (student) => {
+      const studentSubmissions = submissions.filter(s => s.studentId.toString() === student._id.toString());
+      const studentHints = hints.filter(h => h.studentId.toString() === student._id.toString());
+
+      // Calculate progress per activity
+      const activityProgress = activities.map(activity => {
+        const activitySubmissions = studentSubmissions.filter(s => s.activityId.toString() === activity._id.toString());
+        const activityHints = studentHints.filter(h => h.activityId.toString() === activity._id.toString());
+
+        const bestSubmission = activitySubmissions.reduce((best, curr) =>
+          !best || curr.score > best.score ? curr : best, null);
+
+        return {
+          activityId: activity._id,
+          activityTitle: activity.title,
+          attempts: activitySubmissions.length,
+          bestScore: bestSubmission?.score || 0,
+          status: bestSubmission?.status || 'not_started',
+          passed: bestSubmission?.status === 'passed',
+          hintsUsed: activityHints.length,
+          lastAttempt: activitySubmissions[0]?.createdAt || null
+        };
+      });
+
+      // Calculate overall stats
+      const totalActivities = activities.length;
+      const completedActivities = activityProgress.filter(a => a.passed).length;
+      const totalAttempts = studentSubmissions.length;
+      const totalHints = studentHints.length;
+      const avgScore = activityProgress.length > 0
+        ? Math.round(activityProgress.reduce((sum, a) => sum + a.bestScore, 0) / activityProgress.length)
+        : 0;
+
+      return {
+        student: {
+          _id: student._id,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          studentId: student.studentId,
+          course: student.course,
+          yearLevel: student.yearLevel,
+          section: student.section
+        },
+        progress: {
+          completedActivities,
+          totalActivities,
+          completionRate: totalActivities > 0 ? Math.round((completedActivities / totalActivities) * 100) : 0,
+          totalAttempts,
+          totalHints,
+          avgScore
+        },
+        activities: activityProgress
+      };
+    }));
+
+    // Calculate session-wide stats
+    const sessionStats = {
+      totalStudents: enrolledStudents.length,
+      totalActivities: activities.length,
+      avgCompletionRate: studentProgress.length > 0
+        ? Math.round(studentProgress.reduce((sum, s) => sum + s.progress.completionRate, 0) / studentProgress.length)
+        : 0,
+      studentsCompleted: studentProgress.filter(s => s.progress.completionRate === 100).length,
+      totalSubmissions: submissions.length,
+      totalHintsUsed: hints.length
+    };
+
+    res.json({
+      success: true,
+      data: {
+        session: {
+          _id: labSession._id,
+          title: labSession.title,
+          course: labSession.course,
+          yearLevel: labSession.yearLevel,
+          section: labSession.section
+        },
+        stats: sessionStats,
+        students: studentProgress,
+        activities: activities.map(a => ({
+          _id: a._id,
+          title: a.title,
+          topic: a.topic,
+          difficulty: a.difficulty,
+          type: a.type,
+          aiAssistanceLevel: a.aiAssistanceLevel
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Get session progress error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get session progress',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get detailed activity progress (all students for one activity)
+// @route   GET /api/lab-sessions/:id/activities/:activityId/progress
+export const getActivityProgress = async (req, res) => {
+  try {
+    const { id: sessionId, activityId } = req.params;
+
+    const labSession = await LabSession.findById(sessionId);
+    if (!labSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lab session not found'
+      });
+    }
+
+    // Check authorization
+    if (labSession.instructor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to view progress'
+      });
+    }
+
+    const activity = await Activity.findById(activityId).populate('testCases');
+    if (!activity) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found'
+      });
+    }
+
+    // Get enrolled students
+    const enrolledStudents = await getEnrolledStudentsWithUserInfo(sessionId);
+
+    // Get all submissions for this activity
+    const submissions = await Submission.find({ activityId })
+      .sort({ createdAt: -1 });
+
+    // Get all hints for this activity
+    const hints = await HintRequest.find({ activityId })
+      .sort({ createdAt: -1 });
+
+    // Build detailed progress per student
+    const studentProgress = enrolledStudents.map(student => {
+      const studentSubmissions = submissions.filter(s => s.studentId.toString() === student._id.toString());
+      const studentHints = hints.filter(h => h.studentId.toString() === student._id.toString());
+
+      const bestSubmission = studentSubmissions.reduce((best, curr) =>
+        !best || curr.score > best.score ? curr : best, null);
+
+      // Get hints breakdown by level
+      const hintsByLevel = {};
+      studentHints.forEach(h => {
+        hintsByLevel[h.hintLevel] = (hintsByLevel[h.hintLevel] || 0) + 1;
+      });
+
+      return {
+        student: {
+          _id: student._id,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          studentId: student.studentId,
+          course: student.course,
+          yearLevel: student.yearLevel,
+          section: student.section
+        },
+        submissions: {
+          total: studentSubmissions.length,
+          bestScore: bestSubmission?.score || 0,
+          status: bestSubmission?.status || 'not_started',
+          passed: bestSubmission?.status === 'passed',
+          firstAttempt: studentSubmissions[studentSubmissions.length - 1]?.createdAt || null,
+          lastAttempt: studentSubmissions[0]?.createdAt || null,
+          bestSubmissionId: bestSubmission?._id || null
+        },
+        hints: {
+          total: studentHints.length,
+          byLevel: hintsByLevel,
+          highestLevel: studentHints.length > 0 ? Math.max(...studentHints.map(h => h.hintLevel)) : 0
+        },
+        recentSubmissions: studentSubmissions.slice(0, 5).map(s => ({
+          _id: s._id,
+          score: s.score,
+          status: s.status,
+          attemptNumber: s.attemptNumber,
+          createdAt: s.createdAt
+        }))
+      };
+    });
+
+    // Activity-wide stats
+    const activityStats = {
+      totalStudents: enrolledStudents.length,
+      studentsAttempted: studentProgress.filter(s => s.submissions.total > 0).length,
+      studentsPassed: studentProgress.filter(s => s.submissions.passed).length,
+      passRate: enrolledStudents.length > 0
+        ? Math.round((studentProgress.filter(s => s.submissions.passed).length / enrolledStudents.length) * 100)
+        : 0,
+      avgScore: studentProgress.filter(s => s.submissions.total > 0).length > 0
+        ? Math.round(
+            studentProgress
+              .filter(s => s.submissions.total > 0)
+              .reduce((sum, s) => sum + s.submissions.bestScore, 0) /
+            studentProgress.filter(s => s.submissions.total > 0).length
+          )
+        : 0,
+      totalSubmissions: submissions.length,
+      totalHints: hints.length,
+      avgAttempts: studentProgress.filter(s => s.submissions.total > 0).length > 0
+        ? Math.round(
+            studentProgress.reduce((sum, s) => sum + s.submissions.total, 0) /
+            studentProgress.filter(s => s.submissions.total > 0).length * 10
+          ) / 10
+        : 0
+    };
+
+    res.json({
+      success: true,
+      data: {
+        activity: {
+          _id: activity._id,
+          title: activity.title,
+          description: activity.description,
+          topic: activity.topic,
+          difficulty: activity.difficulty,
+          type: activity.type,
+          language: activity.language,
+          timeLimit: activity.timeLimit,
+          aiAssistanceLevel: activity.aiAssistanceLevel,
+          testCaseCount: activity.testCases?.length || 0
+        },
+        stats: activityStats,
+        students: studentProgress
+      }
+    });
+  } catch (error) {
+    console.error('Get activity progress error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get activity progress',
       error: error.message
     });
   }

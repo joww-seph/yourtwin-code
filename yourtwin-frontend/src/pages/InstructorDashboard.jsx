@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { labSessionAPI } from '../services/api';
-import { Users, BookOpen, AlertCircle, CheckCircle, LogOut, Plus, Calendar, Clock, MapPin } from 'lucide-react';
+import { Users, BookOpen, AlertCircle, CheckCircle, LogOut, Plus, Calendar, Clock, MapPin, BarChart3, UserCog } from 'lucide-react';
+import OnlineCounter from '../components/OnlineCounter';
 
 function InstructorDashboard() {
   const { user, logout } = useAuth();
@@ -85,6 +86,20 @@ function InstructorDashboard() {
             <div className="flex items-center gap-4">
               <span className="text-sm text-[#bac2de]">Welcome, Prof. {user?.firstName} {user?.lastName}</span>
               <button
+                onClick={() => navigate('/instructor/analytics')}
+                className="p-2 hover:bg-[#45475a] rounded-lg transition"
+                title="Analytics Dashboard"
+              >
+                <BarChart3 className="w-5 h-5 text-[#bac2de]" />
+              </button>
+              <button
+                onClick={() => navigate('/instructor/profile/edit')}
+                className="p-2 hover:bg-[#45475a] rounded-lg transition"
+                title="Edit Profile"
+              >
+                <UserCog className="w-5 h-5 text-[#bac2de]" />
+              </button>
+              <button
                 onClick={handleLogout}
                 className="p-2 hover:bg-[#45475a] rounded-lg transition"
                 title="Logout"
@@ -124,6 +139,11 @@ function InstructorDashboard() {
             value={totalStudents}
             color="purple"
           />
+        </div>
+
+        {/* Online Students Counter */}
+        <div className="mb-8">
+          <OnlineCounter showDetails={true} />
         </div>
 
         {/* Lab Sessions Management */}

@@ -2,6 +2,7 @@ import User from '../models/User.js';
 import Student from '../models/Student.js';
 import Instructor from '../models/Instructor.js';
 import StudentTwin from '../models/StudentTwin.js';
+import crypto from 'crypto';
 
 // @desc    Register new user
 // @route   POST /api/auth/register
@@ -135,7 +136,7 @@ export const register = async (req, res) => {
 // @route   POST /api/auth/login
 export const login = async (req, res) => {
   try {
-    const { identifier, password } = req.body;
+    const { identifier, password, rememberMe = false } = req.body;
 
     // First, try to find by email
     let user = await User.findOne({ email: identifier }).select('+password');
@@ -194,8 +195,8 @@ export const login = async (req, res) => {
       profileData = await Instructor.findOne({ userId: user._id });
     }
 
-    // Generate token
-    const token = user.generateAuthToken();
+    // Generate token with rememberMe option
+    const token = user.generateAuthToken(rememberMe);
 
     // Build response
     const responseData = {
@@ -226,13 +227,126 @@ export const login = async (req, res) => {
       message: 'Login successful',
       data: {
         user: responseData,
-        token
+        token,
+        expiresIn: rememberMe ? '30d' : '24h'
       }
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: 'Login failed',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Request password reset
+// @route   POST /api/auth/forgot-password
+export const forgotPassword = async (req, res) => {
+  try {
+    const { identifier } = req.body;
+
+    // Find user by email, studentId, or employeeId
+    let user = await User.findOne({ email: identifier });
+
+    if (!user) {
+      const student = await Student.findOne({ studentId: identifier });
+      if (student) {
+        user = await User.findById(student.userId);
+      }
+    }
+
+    if (!user) {
+      const instructor = await Instructor.findOne({ employeeId: identifier });
+      if (instructor) {
+        user = await User.findById(instructor.userId);
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'No account found with that identifier'
+      });
+    }
+
+    // Generate reset token
+    const resetToken = user.generatePasswordResetToken();
+    await user.save({ validateBeforeSave: false });
+
+    // Build reset URL (for frontend)
+    const resetUrl = `/reset-password/${resetToken}`;
+
+    // In production, this would send an email
+    // For now, return the token directly (instructor can share with student)
+    res.json({
+      success: true,
+      message: 'Password reset link generated',
+      data: {
+        resetUrl,
+        resetToken,
+        expiresIn: '1 hour',
+        // Include user info for instructor reference
+        userEmail: user.email,
+        userName: user.displayName
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate reset link',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Reset password with token
+// @route   POST /api/auth/reset-password/:token
+export const resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters'
+      });
+    }
+
+    // Hash the token to compare with stored hash
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // Find user with valid token
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() }
+    }).select('+passwordResetToken +passwordResetExpires');
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired reset token'
+      });
+    }
+
+    // Update password and clear reset fields
+    user.password = password;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password reset successful. You can now login with your new password.'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Password reset failed',
       error: error.message
     });
   }

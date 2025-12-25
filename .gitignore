@@ -34,3 +34,8 @@ build/
 
 # Claude Code
 .claude/
+
+# Convenience batch files (local use only)
+*.bat
+!start-tunnel.bat
+!start-cloudflare-tunnel.bat

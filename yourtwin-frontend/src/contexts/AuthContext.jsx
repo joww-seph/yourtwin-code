@@ -31,19 +31,24 @@ export const AuthProvider = ({ children }) => {
     initAuth();
   }, [token]);
 
-  const login = async (identifier, password) => {
+  const login = async (identifier, password, rememberMe = false) => {
     try {
-      const response = await authAPI.login({ identifier, password });
+      const response = await authAPI.login({ identifier, password, rememberMe });
       const { user: userData, token: authToken } = response.data.data;
-      
+
       // Save to localStorage
       localStorage.setItem('token', authToken);
       localStorage.setItem('user', JSON.stringify(userData));
-      
+      if (rememberMe) {
+        localStorage.setItem('rememberMe', 'true');
+      } else {
+        localStorage.removeItem('rememberMe');
+      }
+
       // Update state
       setToken(authToken);
       setUser(userData);
-      
+
       return { success: true, user: userData };
     } catch (error) {
       console.error('Login error:', error);

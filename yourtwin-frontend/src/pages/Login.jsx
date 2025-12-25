@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { AlertCircle } from 'lucide-react';
 
 function Login() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('student');
+  const [rememberMe, setRememberMe] = useState(localStorage.getItem('rememberMe') === 'true');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -25,7 +25,7 @@ function Login() {
     setLoading(true);
 
     try {
-      const result = await login(identifier, password);
+      const result = await login(identifier, password, rememberMe);
 
       if (result.success) {
         // Validate that the logged-in user's role matches the selected role
@@ -127,6 +127,23 @@ function Login() {
               className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50 disabled:cursor-not-allowed"
               placeholder="••••••••"
             />
+          </div>
+
+          {/* Remember Me & Forgot Password */}
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                disabled={loading}
+                className="w-4 h-4 rounded border-[#45475a] bg-[#1e1e2e] text-[#89b4fa] focus:ring-[#89b4fa] focus:ring-offset-0"
+              />
+              <span className="text-sm text-[#bac2de]">Remember me</span>
+            </label>
+            <a href="/forgot-password" className="text-sm text-[#89b4fa] hover:underline">
+              Forgot password?
+            </a>
           </div>
 
           {/* Login Button */}

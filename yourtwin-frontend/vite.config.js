@@ -5,7 +5,15 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 3000, // Change from default 5173 to 3000
-    open: true  // Auto-open browser
+    port: 3000,
+    host: true, // Listen on all network interfaces (0.0.0.0)
+    open: true,
+    allowedHosts: [
+      'localhost',
+      '.loca.lt',           // localtunnel
+      '.ngrok.io',          // ngrok
+      '.ngrok-free.app',    // ngrok free
+      '.trycloudflare.com'  // cloudflare tunnel
+    ]
   }
 })
