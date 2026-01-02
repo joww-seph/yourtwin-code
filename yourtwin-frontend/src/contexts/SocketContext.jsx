@@ -35,7 +35,15 @@ export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [onlineCount, setOnlineCount] = useState({ studentsOnline: 0, instructorsOnline: 0, students: [] });
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [monitoringUpdates, setMonitoringUpdates] = useState({}); // Map of studentId -> latest data
+  const [flagAlerts, setFlagAlerts] = useState([]); // Recent flag alerts
+  const [sessionStatusChanges, setSessionStatusChanges] = useState([]); // Recent session status changes
   const { user, isAuthenticated } = useAuth();
+
+  // Max number of recent activities to keep
+  const MAX_RECENT_ACTIVITIES = 20;
+  const MAX_FLAG_ALERTS = 50;
 
   useEffect(() => {
     // Only connect if user is authenticated
@@ -74,6 +82,108 @@ export const SocketProvider = ({ children }) => {
       setOnlineCount(data);
     });
 
+    // Listen for real-time submission events (for instructors)
+    newSocket.on('submission-created', (data) => {
+      console.log('📝 New submission:', data);
+      setRecentActivity(prev => {
+        const newActivity = {
+          id: data.submissionId || Date.now(),
+          type: 'submission',
+          studentName: data.studentName,
+          activityTitle: data.activityTitle,
+          score: data.score,
+          status: data.status,
+          passedTests: data.passedTests,
+          totalTests: data.totalTests,
+          timestamp: data.timestamp || new Date()
+        };
+        return [newActivity, ...prev].slice(0, MAX_RECENT_ACTIVITIES);
+      });
+    });
+
+    // Listen for hint request events
+    newSocket.on('hint-requested', (data) => {
+      console.log('💡 Hint requested:', data);
+      setRecentActivity(prev => {
+        const newActivity = {
+          id: Date.now(),
+          type: 'hint',
+          studentName: data.studentName,
+          activityTitle: data.activityTitle,
+          hintLevel: data.hintLevel,
+          timestamp: data.timestamp || new Date()
+        };
+        return [newActivity, ...prev].slice(0, MAX_RECENT_ACTIVITIES);
+      });
+    });
+
+    // Listen for student join events
+    newSocket.on('student-joined-session', (data) => {
+      console.log('👋 Student joined:', data);
+      setRecentActivity(prev => {
+        const newActivity = {
+          id: Date.now(),
+          type: 'join',
+          studentName: data.studentName,
+          sessionTitle: data.sessionTitle,
+          timestamp: data.timestamp || new Date()
+        };
+        return [newActivity, ...prev].slice(0, MAX_RECENT_ACTIVITIES);
+      });
+    });
+
+    // Listen for monitoring updates (real-time student activity)
+    newSocket.on('student-activity', (data) => {
+      console.log('👁️ Student activity:', data);
+      setMonitoringUpdates(prev => ({
+        ...prev,
+        [data.studentId]: {
+          ...data,
+          lastUpdate: new Date()
+        }
+      }));
+    });
+
+    // Listen for monitoring flag alerts
+    newSocket.on('monitoring-flag', (data) => {
+      console.log('🚨 Monitoring flag:', data);
+      setFlagAlerts(prev => {
+        const newAlert = {
+          id: Date.now(),
+          ...data,
+          timestamp: data.timestamp || new Date()
+        };
+        return [newAlert, ...prev].slice(0, MAX_FLAG_ALERTS);
+      });
+      // Also add to recent activity
+      setRecentActivity(prev => {
+        const newActivity = {
+          id: Date.now(),
+          type: 'flag',
+          studentName: data.studentName,
+          flagType: data.flagType,
+          severity: data.severity,
+          description: data.description,
+          timestamp: data.timestamp || new Date()
+        };
+        return [newActivity, ...prev].slice(0, MAX_RECENT_ACTIVITIES);
+      });
+    });
+
+    // Listen for lab session status changes (activate/deactivate)
+    newSocket.on('lab-session-status-change', (data) => {
+      console.log('📅 Lab session status change:', data);
+      setSessionStatusChanges(prev => {
+        const newChange = {
+          id: Date.now(),
+          ...data,
+          receivedAt: new Date()
+        };
+        // Keep only the last 10 changes
+        return [newChange, ...prev].slice(0, 10);
+      });
+    });
+
     newSocket.on('disconnect', () => {
       console.log('❌ Socket disconnected');
       setIsConnected(false);
@@ -94,10 +204,10 @@ export const SocketProvider = ({ children }) => {
     };
   }, [isAuthenticated, user]);
 
-  const joinLabSession = (sessionId) => {
+  const joinLabSession = (sessionId, sessionTitle = null) => {
     if (socket && isConnected) {
-      socket.emit('join-lab-session', sessionId);
-      console.log(`Joined lab-session-${sessionId}`);
+      socket.emit('join-lab-session', { sessionId, sessionTitle });
+      console.log(`Joined lab-session-${sessionId}${sessionTitle ? ` (${sessionTitle})` : ''}`);
     }
   };
 
@@ -108,12 +218,40 @@ export const SocketProvider = ({ children }) => {
     }
   };
 
+  // Clear recent activity
+  const clearRecentActivity = () => {
+    setRecentActivity([]);
+  };
+
+  // Clear flag alerts
+  const clearFlagAlerts = () => {
+    setFlagAlerts([]);
+  };
+
+  // Clear monitoring updates for a specific session (when leaving)
+  const clearMonitoringUpdates = () => {
+    setMonitoringUpdates({});
+  };
+
+  // Clear session status changes
+  const clearSessionStatusChanges = () => {
+    setSessionStatusChanges([]);
+  };
+
   const value = {
     socket,
     isConnected,
     joinLabSession,
     leaveLabSession,
-    onlineCount
+    onlineCount,
+    recentActivity,
+    clearRecentActivity,
+    monitoringUpdates,
+    flagAlerts,
+    clearFlagAlerts,
+    clearMonitoringUpdates,
+    sessionStatusChanges,
+    clearSessionStatusChanges
   };
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;

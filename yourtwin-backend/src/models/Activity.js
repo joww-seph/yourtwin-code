@@ -36,7 +36,7 @@ const activitySchema = new mongoose.Schema({
   },
   language: {
     type: String,
-    enum: ['cpp', 'java', 'python'],
+    enum: ['c', 'cpp', 'java', 'python'],
     required: [true, 'Language is required']
   },
   starterCode: {

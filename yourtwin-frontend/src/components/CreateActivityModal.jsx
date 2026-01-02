@@ -1,20 +1,62 @@
 import { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Eye, EyeOff, Bot, Lock, HelpCircle } from 'lucide-react';
+import { X, Plus, Trash2, Bot, Lock, HelpCircle } from 'lucide-react';
 import { showWarning } from '../utils/sweetalert';
 
-// AI Assistance Level definitions
+// Helper to get language display name
+const getLanguageLabel = (value) => {
+  const labels = { c: 'C', cpp: 'C++', java: 'Java', python: 'Python' };
+  return labels[value] || value;
+};
+
+// AI Assistance Level definitions with detailed descriptions
 const AI_LEVELS = [
-  { level: 0, name: 'Lockdown', desc: 'No AI help - Assessment mode', color: '#f38ba8', icon: Lock },
-  { level: 1, name: 'Questions', desc: 'Socratic guiding questions only', color: '#fab387' },
-  { level: 2, name: 'Concepts', desc: 'Algorithm/data structure hints', color: '#f9e2af' },
-  { level: 3, name: 'Pseudocode', desc: 'Step-by-step logic guidance', color: '#a6e3a1' },
-  { level: 4, name: 'Examples', desc: 'Similar problem patterns', color: '#89b4fa' },
-  { level: 5, name: 'Guided', desc: 'Detailed help with code hints', color: '#cba6f7' }
+  {
+    level: 0,
+    name: 'Lockdown',
+    desc: 'No AI assistance available',
+    longDesc: 'Students cannot request any AI help. Best for exams, final assessments, and evaluating true independent coding ability.',
+    color: '#f38ba8',
+    icon: Lock
+  },
+  {
+    level: 1,
+    name: 'Questions',
+    desc: 'Guiding questions only',
+    longDesc: 'AI responds only with Socratic questions to help students think through the problem. Promotes critical thinking and independent problem-solving.',
+    color: '#fab387'
+  },
+  {
+    level: 2,
+    name: 'Concepts',
+    desc: 'Conceptual hints',
+    longDesc: 'AI can explain relevant algorithms, data structures, and programming concepts without showing implementation details or code examples.',
+    color: '#f9e2af'
+  },
+  {
+    level: 3,
+    name: 'Pseudocode',
+    desc: 'Logic guidance',
+    longDesc: 'AI can provide step-by-step pseudocode and logical breakdowns of the solution approach without actual code syntax.',
+    color: '#a6e3a1'
+  },
+  {
+    level: 4,
+    name: 'Examples',
+    desc: 'Similar patterns',
+    longDesc: 'AI can show examples of similar problems and patterns. Students must demonstrate understanding before receiving more detailed help.',
+    color: '#89b4fa'
+  },
+  {
+    level: 5,
+    name: 'Full Help',
+    desc: 'Complete assistance',
+    longDesc: 'Full AI assistance with code hints and detailed explanations. Best for learning exercises, tutorials, and practice activities.',
+    color: '#cba6f7'
+  }
 ];
 
-function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initialData = null, mode = 'create' }) {
+function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initialData = null, mode = 'create', sessionLanguage = null }) {
   const [activeTab, setActiveTab] = useState('basic');
-  const [showPreview, setShowPreview] = useState(false);
 
   const isEditMode = mode === 'edit';
   const isDuplicateMode = mode === 'duplicate';
@@ -25,7 +67,7 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
     topic: '',
     difficulty: 'medium',
     type: 'practice',
-    language: 'python',
+    language: sessionLanguage || 'python',
     timeLimit: 30,
     aiAssistanceLevel: 5,
     testCases: []
@@ -43,13 +85,14 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
     if (isOpen) {
       if (initialData) {
         // Populate form with existing data for edit/duplicate mode
+        // Always use sessionLanguage if provided (session controls the language)
         setFormData({
           title: isDuplicateMode ? `${initialData.title} (Copy)` : initialData.title || '',
           description: initialData.description || '',
           topic: initialData.topic || '',
           difficulty: initialData.difficulty || 'medium',
           type: initialData.type || 'practice',
-          language: initialData.language || 'python',
+          language: sessionLanguage || initialData.language || 'python',
           timeLimit: initialData.timeLimit || 30,
           aiAssistanceLevel: initialData.aiAssistanceLevel ?? 5,
           testCases: initialData.testCases ? initialData.testCases.map(tc => ({
@@ -68,12 +111,16 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
         description: ''
       });
       setActiveTab('basic');
-      setShowPreview(false);
     }
-  }, [isOpen, initialData, mode]);
+  }, [isOpen, initialData, mode, sessionLanguage]);
 
   // Keep language options aligned with backend Activity model enum
-  const languages = ['python', 'java', 'cpp'];
+  const languages = [
+    { value: 'c', label: 'C' },
+    { value: 'cpp', label: 'C++' },
+    { value: 'java', label: 'Java' },
+    { value: 'python', label: 'Python' }
+  ];
   const difficulties = ['easy', 'medium', 'hard'];
   // Activity types must match backend enum: 'practice' or 'final'
   const types = ['practice', 'final'];
@@ -247,20 +294,27 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
+                  <label className="block text-base font-medium text-[#cdd6f4] mb-2">
                     Language
                   </label>
-                  <select
-                    value={formData.language}
-                    onChange={(e) => handleInputChange('language', e.target.value)}
-                    className="w-full bg-[#45475a] border border-[#585b70] rounded px-3 py-2 text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa]"
-                  >
-                    {languages.map(lang => (
-                      <option key={lang} value={lang}>
-                        {lang.charAt(0).toUpperCase() + lang.slice(1)}
-                      </option>
-                    ))}
-                  </select>
+                  {sessionLanguage ? (
+                    <div className="w-full bg-[#45475a]/50 border border-[#585b70] rounded px-4 py-3 text-base text-[#94e2d5] font-medium flex items-center justify-between">
+                      <span>{getLanguageLabel(formData.language)}</span>
+                      <span className="text-xs text-[#6c7086] bg-[#313244] px-2 py-1 rounded">From Session</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={formData.language}
+                      onChange={(e) => handleInputChange('language', e.target.value)}
+                      className="w-full bg-[#45475a] border border-[#585b70] rounded px-4 py-3 text-base text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa]"
+                    >
+                      {languages.map(lang => (
+                        <option key={lang.value} value={lang.value}>
+                          {lang.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
 
@@ -334,7 +388,7 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
                 </div>
 
                 <div className="grid grid-cols-6 gap-2">
-                  {AI_LEVELS.map(({ level, name, desc, color, icon: Icon }) => {
+                  {AI_LEVELS.map(({ level, name, color, icon: Icon }) => {
                     const isSelected = formData.aiAssistanceLevel === level;
                     return (
                       <button
@@ -368,16 +422,18 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
                 </div>
 
                 {/* Selected level description */}
-                <div className="mt-3 p-3 rounded-lg" style={{
+                <div className="mt-4 p-4 rounded-lg" style={{
                   backgroundColor: `${AI_LEVELS[formData.aiAssistanceLevel]?.color}15`
                 }}>
-                  <p className="text-sm" style={{ color: AI_LEVELS[formData.aiAssistanceLevel]?.color }}>
-                    <span className="font-medium">Level {formData.aiAssistanceLevel}:</span>{' '}
-                    {AI_LEVELS[formData.aiAssistanceLevel]?.desc}
+                  <p className="text-base font-semibold mb-2" style={{ color: AI_LEVELS[formData.aiAssistanceLevel]?.color }}>
+                    Level {formData.aiAssistanceLevel}: {AI_LEVELS[formData.aiAssistanceLevel]?.name}
+                  </p>
+                  <p className="text-sm text-[#bac2de] leading-relaxed">
+                    {AI_LEVELS[formData.aiAssistanceLevel]?.longDesc}
                   </p>
                   {formData.aiAssistanceLevel === 0 && (
-                    <p className="text-xs text-[#f38ba8] mt-1">
-                      Students will not be able to use Shadow Twin AI assistance during this activity.
+                    <p className="text-sm text-[#f38ba8] mt-2 font-medium">
+                      ⚠️ Students will not be able to use Shadow Twin AI assistance during this activity.
                     </p>
                   )}
                 </div>
@@ -490,66 +546,92 @@ function CreateActivityModal({ isOpen, onClose, onSubmit, loading = false, initi
           {/* Preview Tab */}
           {activeTab === 'preview' && (
             <div className="space-y-4">
-              <div className="bg-[#45475a] rounded-lg p-4 space-y-3">
-                <h3 className="font-bold text-[#cdd6f4]">{formData.title || 'Untitled Activity'}</h3>
-
-                <div>
-                  <p className="text-sm text-[#bac2de] mb-2">Description:</p>
-                  <p className="text-[#cdd6f4] whitespace-pre-wrap">
-                    {formData.description || 'No description provided'}
+              {/* Activity Card Preview */}
+              <div className="bg-[#181825] rounded-xl border border-[#313244] overflow-hidden">
+                {/* Header */}
+                <div className="bg-gradient-to-r from-[#89b4fa]/20 to-[#cba6f7]/20 px-6 py-4 border-b border-[#313244]">
+                  <h3 className="text-xl font-bold text-[#cdd6f4]">{formData.title || 'Untitled Activity'}</h3>
+                  <p className="text-sm text-[#a6adc8] mt-1">
+                    {formData.topic || 'No topic specified'}
                   </p>
                 </div>
 
-                <div className="flex gap-3 flex-wrap">
-                  <span className="px-2 py-1 bg-[#89b4fa] bg-opacity-20 text-[#89b4fa] text-xs rounded">
-                    {formData.topic || 'No topic'}
-                  </span>
-                  <span className={`px-2 py-1 text-xs rounded ${
+                {/* Tags */}
+                <div className="px-6 py-4 flex gap-3 flex-wrap border-b border-[#313244]">
+                  <span className={`px-3 py-1.5 text-sm font-medium rounded-lg ${
                     formData.difficulty === 'easy'
-                      ? 'bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1]'
+                      ? 'bg-[#a6e3a1]/20 text-[#a6e3a1]'
                       : formData.difficulty === 'medium'
-                      ? 'bg-[#f9e2af] bg-opacity-20 text-[#f9e2af]'
-                      : 'bg-[#f38ba8] bg-opacity-20 text-[#f38ba8]'
+                      ? 'bg-[#f9e2af]/20 text-[#f9e2af]'
+                      : 'bg-[#f38ba8]/20 text-[#f38ba8]'
                   }`}>
-                    {formData.difficulty}
+                    {formData.difficulty.charAt(0).toUpperCase() + formData.difficulty.slice(1)}
                   </span>
-                  <span className="px-2 py-1 bg-[#cba6f7] bg-opacity-20 text-[#cba6f7] text-xs rounded">
-                    {formData.language}
+                  <span className="px-3 py-1.5 bg-[#cba6f7]/20 text-[#cba6f7] text-sm font-medium rounded-lg">
+                    {getLanguageLabel(formData.language)}
                   </span>
-                  <span className="px-2 py-1 bg-[#94e2d5] bg-opacity-20 text-[#94e2d5] text-xs rounded">
-                    {formData.type}
+                  <span className="px-3 py-1.5 bg-[#94e2d5]/20 text-[#94e2d5] text-sm font-medium rounded-lg">
+                    {formData.type.charAt(0).toUpperCase() + formData.type.slice(1)}
                   </span>
-                  <span className="px-2 py-1 bg-[#bac2de] bg-opacity-20 text-[#bac2de] text-xs rounded">
-                    {formData.timeLimit} min
+                  <span className="px-3 py-1.5 bg-[#bac2de]/20 text-[#bac2de] text-sm font-medium rounded-lg">
+                    ⏱️ {formData.timeLimit} min
                   </span>
                   <span
-                    className="px-2 py-1 text-xs rounded flex items-center gap-1"
+                    className="px-3 py-1.5 text-sm font-medium rounded-lg flex items-center gap-1"
                     style={{
                       backgroundColor: `${AI_LEVELS[formData.aiAssistanceLevel]?.color}20`,
                       color: AI_LEVELS[formData.aiAssistanceLevel]?.color
                     }}
                   >
                     {formData.aiAssistanceLevel === 0 ? (
-                      <><Lock className="w-3 h-3" /> Lockdown</>
+                      <><Lock className="w-4 h-4" /> Lockdown</>
                     ) : (
-                      <>AI Lv.{formData.aiAssistanceLevel}</>
+                      <>🤖 AI Level {formData.aiAssistanceLevel}</>
                     )}
                   </span>
                 </div>
 
+                {/* Description */}
+                <div className="px-6 py-4">
+                  <h4 className="text-base font-semibold text-[#cdd6f4] mb-2">Description</h4>
+                  <p className="text-sm text-[#bac2de] whitespace-pre-wrap leading-relaxed">
+                    {formData.description || 'No description provided'}
+                  </p>
+                </div>
+
+                {/* Test Cases */}
                 {formData.testCases.length > 0 && (
-                  <div>
-                    <p className="text-sm text-[#bac2de] mb-2">Test Cases: {formData.testCases.length}</p>
+                  <div className="px-6 py-4 border-t border-[#313244]">
+                    <h4 className="text-base font-semibold text-[#cdd6f4] mb-3">
+                      Test Cases ({formData.testCases.length})
+                    </h4>
                     <div className="space-y-2">
                       {formData.testCases.map((tc, idx) => (
-                        <div key={idx} className="bg-[#1e1e2e] rounded p-2 text-xs text-[#6c7086]">
-                          Test {idx + 1}: {tc.input ? `${tc.input.split('\n')[0]}...` : '(no input)'} → {tc.expectedOutput.split('\n')[0]}...
+                        <div key={idx} className="bg-[#313244] rounded-lg p-3 flex items-center gap-4">
+                          <span className="text-sm font-medium text-[#89b4fa]">#{idx + 1}</span>
+                          <div className="flex-1 text-sm">
+                            <span className="text-[#6c7086]">Input: </span>
+                            <span className="text-[#a6e3a1] font-mono">
+                              {tc.input ? tc.input.split('\n')[0] : '(none)'}
+                            </span>
+                          </div>
+                          <span className="text-[#6c7086]">→</span>
+                          <div className="flex-1 text-sm">
+                            <span className="text-[#6c7086]">Output: </span>
+                            <span className="text-[#f9e2af] font-mono">
+                              {tc.expectedOutput.split('\n')[0]}
+                            </span>
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
+
+              <p className="text-center text-sm text-[#6c7086]">
+                This is how students will see the activity
+              </p>
             </div>
           )}
         </div>

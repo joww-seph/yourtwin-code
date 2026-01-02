@@ -7,6 +7,10 @@ import {
   deleteLabSession,
   activateLabSession,
   deactivateLabSession,
+  markSessionComplete,
+  reopenSession,
+  extendLabSession,
+  allowResubmission,
   getAvailableStudents,
   addStudentsToSession,
   removeStudentFromSession,
@@ -28,14 +32,20 @@ router.post('/', authorize('instructor', 'admin'), createLabSession);
 router.put('/:id', authorize('instructor', 'admin'), updateLabSession);
 router.delete('/:id', authorize('instructor', 'admin'), deleteLabSession);
 
-// Session activation/deactivation
+// Session activation/deactivation/completion
 router.put('/:id/activate', authorize('instructor', 'admin'), activateLabSession);
 router.put('/:id/deactivate', authorize('instructor', 'admin'), deactivateLabSession);
+router.put('/:id/complete', authorize('instructor', 'admin'), markSessionComplete);
+router.put('/:id/reopen', authorize('instructor', 'admin'), reopenSession);
+router.put('/:id/extend', authorize('instructor', 'admin'), extendLabSession);
 
 // Student management
 router.get('/:id/available-students', authorize('instructor', 'admin'), getAvailableStudents);
 router.post('/:id/students', authorize('instructor', 'admin'), addStudentsToSession);
 router.delete('/:id/students/:studentId', authorize('instructor', 'admin'), removeStudentFromSession);
+
+// Resubmission control
+router.put('/:sessionId/resubmit/:studentId/:activityId', authorize('instructor', 'admin'), allowResubmission);
 
 // Middleware to pass sessionId to activity controller
 const passSessionId = (req, res, next) => {

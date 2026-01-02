@@ -1,23 +1,16 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 function Login() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('student');
   const [rememberMe, setRememberMe] = useState(localStorage.getItem('rememberMe') === 'true');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
-  const { login, logout } = useAuth();
-
-  // Clear error when role changes
-  const handleRoleChange = (newRole) => {
-    setRole(newRole);
-    setError('');
-  };
+  const { login } = useAuth();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -28,26 +21,12 @@ function Login() {
       const result = await login(identifier, password, rememberMe);
 
       if (result.success) {
-        // Validate that the logged-in user's role matches the selected role
-        if (result.user.role !== role) {
-          // Logout to clear the token since role doesn't match
-          logout();
-          setError(`This account is registered as a ${result.user.role}. Please select the correct role and try again.`);
-          setLoading(false);
-          return;
-        }
-
-        // Redirect based on user role
-        if (result.user.role === 'student') {
-          navigate('/student/dashboard');
-        } else if (result.user.role === 'instructor') {
-          navigate('/instructor/dashboard');
-        }
+        // Auto-redirect based on the user's actual role from backend
+        navigate(result.user.role === 'student' ? '/student/dashboard' : '/instructor/dashboard');
       } else {
         setError(result.message);
       }
     } catch (err) {
-      console.error('Login error:', err);
       setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
@@ -55,52 +34,25 @@ function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#1e1e2e] to-[#181825] flex items-center justify-center p-4">
-      <div className="bg-[#313244] rounded-lg shadow-2xl p-8 w-full max-w-md border border-[#45475a]">
-        <div className="text-center mb-8">
-          <img src="/header.png" alt="YOURTWIN: CODE" className="h-15 w-auto" />
+    <div className="min-h-screen bg-[#1e1e2e] flex items-center justify-center p-4">
+      <div className="bg-[#181825] rounded-xl border border-[#313244] p-6 w-full max-w-sm">
+        {/* Logo */}
+        <div className="text-center mb-6">
+          <img src="/header.png" alt="YOURTWIN: CODE" className="h-16 mx-auto mb-3" />
+          <p className="text-sm text-[#6c7086]">Sign in to your account</p>
         </div>
 
-        {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-[#f38ba8]/10 border border-[#f38ba8] rounded-lg">
-            <p className="text-sm text-[#f38ba8]">{error}</p>
+          <div className="mb-4 p-3 bg-[#f38ba8]/10 border border-[#f38ba8]/30 rounded-lg">
+            <p className="text-xs text-[#f38ba8]">{error}</p>
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-6">
-          {/* Role Selection */}
-          <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={() => handleRoleChange('student')}
-              disabled={loading}
-              className={`flex-1 py-2 px-4 rounded-lg font-medium transition ${
-                role === 'student'
-                  ? 'bg-gradient-to-r from-[#89b4fa] to-[#74c7ec] text-[#1e1e2e]'
-                  : 'bg-[#45475a] text-[#cdd6f4] hover:bg-[#585b70]'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              Student
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRoleChange('instructor')}
-              disabled={loading}
-              className={`flex-1 py-2 px-4 rounded-lg font-medium transition ${
-                role === 'instructor'
-                  ? 'bg-gradient-to-r from-[#a6e3a1] to-[#94e2d5] text-[#1e1e2e]'
-                  : 'bg-[#45475a] text-[#cdd6f4] hover:bg-[#585b70]'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              Instructor
-            </button>
-          </div>
-
-          {/* Email Input */}
+        <form onSubmit={handleLogin} className="space-y-4">
+          {/* Identifier */}
           <div>
-            <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
-              {role === 'student' ? 'Student ID or Email' : 'Employee ID or Email'}
+            <label className="block text-xs font-medium text-[#6c7086] mb-1.5">
+              Student ID or Email
             </label>
             <input
               type="text"
@@ -108,73 +60,65 @@ function Login() {
               onChange={(e) => setIdentifier(e.target.value)}
               required
               disabled={loading}
-              className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
-              placeholder={role === 'student' ? "Enter your Student ID or Email" : "Enter your Employee ID or Email"}
+              className="w-full px-3 py-2 bg-[#1e1e2e] border border-[#313244] rounded-lg text-sm text-[#cdd6f4] placeholder-[#45475a] focus:ring-1 focus:ring-[#89b4fa] focus:border-[#89b4fa] disabled:opacity-50"
+              placeholder="e.g., 2021-12345 or email@example.com"
             />
           </div>
 
-          {/* Password Input */}
+          {/* Password */}
           <div>
-            <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
-              Password
-            </label>
+            <label className="block text-xs font-medium text-[#6c7086] mb-1.5">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               disabled={loading}
-              className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50 disabled:cursor-not-allowed"
-              placeholder="••••••••"
+              className="w-full px-3 py-2 bg-[#1e1e2e] border border-[#313244] rounded-lg text-sm text-[#cdd6f4] placeholder-[#45475a] focus:ring-1 focus:ring-[#89b4fa] focus:border-[#89b4fa] disabled:opacity-50"
+              placeholder="Enter your password"
             />
           </div>
 
-          {/* Remember Me & Forgot Password */}
-          <div className="flex items-center justify-between">
+          {/* Remember Me & Forgot */}
+          <div className="flex items-center justify-between text-xs">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
                 disabled={loading}
-                className="w-4 h-4 rounded border-[#45475a] bg-[#1e1e2e] text-[#89b4fa] focus:ring-[#89b4fa] focus:ring-offset-0"
+                className="w-3.5 h-3.5 rounded border-[#313244] bg-[#1e1e2e] text-[#89b4fa] focus:ring-[#89b4fa] focus:ring-offset-0"
               />
-              <span className="text-sm text-[#bac2de]">Remember me</span>
+              <span className="text-[#6c7086]">Remember me</span>
             </label>
-            <a href="/forgot-password" className="text-sm text-[#89b4fa] hover:underline">
+            <Link to="/forgot-password" className="text-[#89b4fa] hover:text-[#b4befe]">
               Forgot password?
-            </a>
+            </Link>
           </div>
 
-          {/* Login Button */}
+          {/* Submit */}
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] text-[#1e1e2e] py-3 rounded-lg font-medium hover:opacity-90 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] text-[#1e1e2e] py-2.5 rounded-lg text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {loading ? (
               <>
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[#1e1e2e]"></div>
-                Logging in...
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#1e1e2e]"></div>
+                Signing in...
               </>
             ) : (
-              'Login'
+              'Sign In'
             )}
           </button>
         </form>
 
-        <div className="mt-6 text-center text-sm text-[#bac2de]">
-          <p>Don't have an account? <a href="/register" className="text-[#89b4fa] hover:underline">Register</a></p>
-        </div>
-
-        {/* Test Accounts Info */}
-        <div className="mt-6 p-4 bg-[#1e1e2e] border border-[#45475a] rounded-lg">
-          <p className="text-xs font-medium text-[#89b4fa] mb-2">Test Accounts:</p>
-          <div className="text-xs text-[#bac2de] space-y-1">
-            <p>Student: marc@mmsu.edu.ph / student123</p>
-            <p>Instructor: instructor@mmsu.edu.ph / instructor123</p>
-          </div>
-        </div>
+        <p className="mt-4 text-center text-xs text-[#6c7086]">
+          Don't have an account?{' '}
+          <Link to="/register" className="text-[#89b4fa] hover:text-[#b4befe]">
+            Register
+          </Link>
+        </p>
       </div>
     </div>
   );

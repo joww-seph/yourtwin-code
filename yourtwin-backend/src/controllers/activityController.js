@@ -3,6 +3,7 @@ import LabSession from '../models/LabSession.js';
 import TestCase from '../models/TestCase.js';
 import Student from '../models/Student.js';
 import SessionEnrollment from '../models/SessionEnrollment.js';
+import CodeSnapshot from '../models/CodeSnapshot.js';
 import { emitToLabSession, emitToAllStudents, emitToAllInstructors } from '../utils/socket.js';
 
 // @desc    Create activity within a lab session
@@ -342,6 +343,171 @@ export const deleteActivity = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to delete activity',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Save draft code for an activity (auto-save)
+// @route   POST /api/activities/:id/draft
+export const saveDraftCode = async (req, res) => {
+  try {
+    const { code, language } = req.body;
+    const activityId = req.params.id;
+
+    if (!code && code !== '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Code is required'
+      });
+    }
+
+    // Get student profile
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    if (!studentProfile) {
+      return res.status(403).json({
+        success: false,
+        message: 'Student profile not found'
+      });
+    }
+
+    // Get activity to find lab session
+    const activity = await Activity.findById(activityId);
+    if (!activity) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found'
+      });
+    }
+
+    // Find existing draft or create new one
+    let draft = await CodeSnapshot.findOne({
+      studentId: studentProfile._id,
+      activityId: activityId,
+      snapshotType: 'draft'
+    });
+
+    if (draft) {
+      // Update existing draft
+      draft.code = code;
+      draft.language = language || activity.language;
+      draft.metrics = {
+        lineCount: code.split('\n').length,
+        charCount: code.length
+      };
+      await draft.save();
+    } else {
+      // Create new draft
+      draft = await CodeSnapshot.create({
+        studentId: studentProfile._id,
+        activityId: activityId,
+        labSessionId: activity.labSession,
+        code: code,
+        language: language || activity.language,
+        snapshotType: 'draft',
+        metrics: {
+          lineCount: code.split('\n').length,
+          charCount: code.length
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Draft saved',
+      data: {
+        savedAt: draft.updatedAt || draft.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Save draft error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save draft',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Load draft code for an activity
+// @route   GET /api/activities/:id/draft
+export const loadDraftCode = async (req, res) => {
+  try {
+    const activityId = req.params.id;
+
+    // Get student profile
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    if (!studentProfile) {
+      return res.status(403).json({
+        success: false,
+        message: 'Student profile not found'
+      });
+    }
+
+    // Find draft
+    const draft = await CodeSnapshot.findOne({
+      studentId: studentProfile._id,
+      activityId: activityId,
+      snapshotType: 'draft'
+    }).sort({ updatedAt: -1 });
+
+    if (!draft) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'No draft found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        code: draft.code,
+        language: draft.language,
+        savedAt: draft.updatedAt || draft.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Load draft error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load draft',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Clear draft code for an activity (on reset)
+// @route   DELETE /api/activities/:id/draft
+export const clearDraftCode = async (req, res) => {
+  try {
+    const activityId = req.params.id;
+
+    // Get student profile
+    const studentProfile = await Student.findOne({ userId: req.user._id });
+    if (!studentProfile) {
+      return res.status(403).json({
+        success: false,
+        message: 'Student profile not found'
+      });
+    }
+
+    // Delete draft
+    await CodeSnapshot.deleteOne({
+      studentId: studentProfile._id,
+      activityId: activityId,
+      snapshotType: 'draft'
+    });
+
+    res.json({
+      success: true,
+      message: 'Draft cleared'
+    });
+  } catch (error) {
+    console.error('Clear draft error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear draft',
       error: error.message
     });
   }

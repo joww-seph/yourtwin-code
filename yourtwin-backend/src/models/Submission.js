@@ -41,7 +41,7 @@ const submissionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'running', 'passed', 'failed', 'error'],
+    enum: ['pending', 'running', 'passed', 'failed', 'error', 'resubmission_required'],
     default: 'pending'
   },
   executionTime: {
@@ -79,6 +79,58 @@ const submissionSchema = new mongoose.Schema({
   isLockdownMode: {
     type: Boolean,
     default: false
+  },
+  // Code analysis results (intelligent validation)
+  codeAnalysis: {
+    isSuspicious: {
+      type: Boolean,
+      default: false
+    },
+    suspicionScore: {
+      type: Number,
+      default: 0
+    },
+    flags: [{
+      type: {
+        type: String,
+        enum: [
+          'hardcoded_output',
+          'suspicious_literals',
+          'no_input_usage',
+          'missing_iteration',
+          'too_short',
+          'all_outputs_hardcoded',
+          'ai_detected_workaround',
+          // New flag types from enhanced code analyzer
+          'conditional_output_workaround',
+          'single_conditional_output',
+          'input_value_check'
+        ]
+      },
+      severity: {
+        type: String,
+        enum: ['low', 'medium', 'high', 'critical']
+      },
+      description: String
+    }],
+    // AI validation results
+    aiValidation: {
+      isLegitimate: Boolean,
+      followsInstructions: Boolean,
+      isHardcoded: Boolean,
+      confidence: Number,
+      explanation: String,
+      issues: [String],
+      responseTime: Number,
+      model: String,
+      validatedAt: Date
+    }
+  },
+  // Validation status for tracking background AI validation
+  validationStatus: {
+    type: String,
+    enum: ['pending', 'validated', 'flagged', 'skipped'],
+    default: 'pending'
   }
 }, {
   timestamps: true

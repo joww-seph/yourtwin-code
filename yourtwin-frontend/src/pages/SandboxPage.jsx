@@ -50,6 +50,25 @@ int main() {
     cout << "Hello, " << name << "! You are " << age << " years old." << endl;
     return 0;
 }
+`,
+  c: `#include <stdio.h>
+#include <string.h>
+
+int main() {
+    char name[100];
+    int age;
+
+    printf("Enter your name: ");
+    fgets(name, sizeof(name), stdin);
+    // Remove newline from fgets
+    name[strcspn(name, "\\n")] = 0;
+
+    printf("Enter your age: ");
+    scanf("%d", &age);
+
+    printf("Hello, %s! You are %d years old.\\n", name, age);
+    return 0;
+}
 `
 };
 
@@ -66,6 +85,7 @@ function SandboxPage() {
     return savedCode || STARTER_CODE[savedLang];
   });
   const [isRunning, setIsRunning] = useState(false);
+  const [acceptingInput, setAcceptingInput] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [savedIndicator, setSavedIndicator] = useState(false);
 
@@ -75,12 +95,17 @@ function SandboxPage() {
   const fitAddonRef = useRef(null);
   const inputBufferRef = useRef('');
   const isRunningRef = useRef(false);
+  const acceptingInputRef = useRef(false);
   const socketRef = useRef(null);
 
   // Keep refs in sync with state
   useEffect(() => {
     isRunningRef.current = isRunning;
   }, [isRunning]);
+
+  useEffect(() => {
+    acceptingInputRef.current = acceptingInput;
+  }, [acceptingInput]);
 
   useEffect(() => {
     socketRef.current = socket;
@@ -148,9 +173,20 @@ function SandboxPage() {
     term.writeln('\x1b[38;5;243mPress Run (Ctrl+Enter) to execute.\x1b[0m');
     term.writeln('');
 
-    // Handle user input
+    // Handle user input - only accept when program is actually running (not compiling)
     term.onData((data) => {
-      if (!isRunningRef.current) return;
+      // Ctrl+C should always work to stop execution (even during compilation)
+      if (data === '\x03') {
+        if (socketRef.current && isRunningRef.current) {
+          socketRef.current.emit('sandbox-stop');
+        }
+        return;
+      }
+
+      // Block all other input until program is ready
+      if (!acceptingInputRef.current) {
+        return;
+      }
 
       // Handle special keys
       if (data === '\r' || data === '\n') {
@@ -165,11 +201,6 @@ function SandboxPage() {
         if (inputBufferRef.current.length > 0) {
           inputBufferRef.current = inputBufferRef.current.slice(0, -1);
           term.write('\b \b');
-        }
-      } else if (data === '\x03') {
-        // Ctrl+C - stop execution
-        if (socketRef.current) {
-          socketRef.current.emit('sandbox-stop');
         }
       } else if (data >= ' ' || data === '\t') {
         // Regular character
@@ -201,10 +232,15 @@ function SandboxPage() {
       if (!term) return;
 
       if (data.type === 'stdout') {
+        // Program is running and producing output - now accept input
+        if (!acceptingInputRef.current) {
+          setAcceptingInput(true);
+        }
         term.write(data.data);
       } else if (data.type === 'stderr') {
         term.write(`\x1b[31m${data.data}\x1b[0m`);
       } else if (data.type === 'system') {
+        // System messages (like "Compiling...") - don't enable input yet
         term.write(`\x1b[33m${data.data}\x1b[0m`);
       }
     };
@@ -219,6 +255,7 @@ function SandboxPage() {
         }
       }
       setIsRunning(false);
+      setAcceptingInput(false);
       inputBufferRef.current = '';
     };
 
@@ -228,6 +265,7 @@ function SandboxPage() {
         term.writeln(`\x1b[31mError: ${data.message}\x1b[0m\n`);
       }
       setIsRunning(false);
+      setAcceptingInput(false);
       inputBufferRef.current = '';
     };
 
@@ -237,6 +275,7 @@ function SandboxPage() {
         term.writeln('\n\x1b[33m--- Stopped ---\x1b[0m\n');
       }
       setIsRunning(false);
+      setAcceptingInput(false);
       inputBufferRef.current = '';
     };
 
@@ -294,9 +333,10 @@ function SandboxPage() {
     const term = terminalRef.current;
     term.clear();
     term.writeln(`\x1b[36m--- Running ${language.toUpperCase()} ---\x1b[0m`);
-    term.writeln('\x1b[38;5;243mType input when prompted. Ctrl+C to stop.\x1b[0m\n');
+    term.writeln('\x1b[38;5;243mInput enabled after program starts. Ctrl+C to stop.\x1b[0m\n');
 
     setIsRunning(true);
+    setAcceptingInput(false); // Reset - will be enabled when stdout is received
     inputBufferRef.current = '';
 
     socket.emit('sandbox-run', { code, language });
@@ -307,6 +347,7 @@ function SandboxPage() {
       socket.emit('sandbox-stop');
     }
     setIsRunning(false);
+    setAcceptingInput(false);
     inputBufferRef.current = '';
   };
 
@@ -346,6 +387,7 @@ function SandboxPage() {
   }, [handleKeyDown]);
 
   const languageMap = {
+    c: 'c',
     cpp: 'cpp',
     java: 'java',
     python: 'python'
@@ -400,9 +442,10 @@ function SandboxPage() {
                 onChange={(e) => handleLanguageChange(e.target.value)}
                 className="bg-[#45475a] border border-[#585b70] rounded px-3 py-1.5 text-[#cdd6f4] text-sm focus:outline-none focus:border-[#89b4fa]"
               >
-                <option value="python">Python</option>
-                <option value="java">Java</option>
+                <option value="c">C</option>
                 <option value="cpp">C++</option>
+                <option value="java">Java</option>
+                <option value="python">Python</option>
               </select>
 
               <span className="px-2 py-1 bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1] text-xs rounded-full">

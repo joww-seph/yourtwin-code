@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import connectDB from './config/database.js';
@@ -16,9 +17,12 @@ import studentRoutes from './routes/studentRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import plagiarismRoutes from './routes/plagiarismRoutes.js';
+import twinRoutes from './routes/twinRoutes.js';
+import monitoringRoutes from './routes/monitoringRoutes.js'; // Activity monitoring
 
 // Import AI service for initialization
 import * as aiService from './services/aiService.js';
+import { retryPendingValidations } from './services/backgroundValidationService.js';
 
 // Load environment variables
 dotenv.config();
@@ -116,6 +120,8 @@ app.use('/api/students', studentRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/plagiarism', plagiarismRoutes);
+app.use('/api/twin', twinRoutes);
+app.use('/api/monitoring', monitoringRoutes);
 
 // Initialize Socket.io with connection handling
 initializeSocket(io);
@@ -149,6 +155,17 @@ httpServer.listen(PORT, HOST, async () => {
   } catch (error) {
     console.error('⚠️ AI Service initialization warning:', error.message);
   }
+
+  // Retry any pending validations from previous server runs
+  try {
+    await retryPendingValidations();
+  } catch (error) {
+    console.error('⚠️ Background validation retry warning:', error.message);
+  }
+
+  // Lab sessions are now manually managed by instructors
+  // Auto-activation/deactivation has been removed for simplicity
+  console.log('📅 Lab session management: Manual control enabled');
 });
 
 // Handle unhandled promise rejections

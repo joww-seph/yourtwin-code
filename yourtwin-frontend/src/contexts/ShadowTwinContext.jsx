@@ -1,3 +1,28 @@
+/**
+ * SHADOW TWIN CONTEXT
+ *
+ * This context manages the SHADOW TWIN - the cognitive opposite of the student.
+ *
+ * DIGITAL TWIN ARCHITECTURE:
+ * - MIRROR TWIN (StudentTwin model): Exact replica of student's learning data,
+ *   behavioral patterns, and cognitive profile. Used to determine learning paths.
+ *
+ * - SHADOW TWIN (this context + shadowTwinEngine): The cognitive opposite of the
+ *   student. Where the student has weaknesses, the Shadow Twin has strengths.
+ *   Provides personalized hints through the 5-level system.
+ *
+ * THE 5-LEVEL HINT SYSTEM:
+ * Level 1: General guidance and problem understanding
+ * Level 2: Code structure and approach suggestions
+ * Level 3: Algorithmic hints and logic assistance
+ * Level 4: Partial code examples and detailed guidance
+ * Level 5: Complete solution with mandatory comprehension check
+ *
+ * The Shadow Twin adapts its hints based on the Mirror Twin's profile,
+ * filling in the gaps in the student's knowledge while encouraging
+ * independent problem-solving.
+ */
+
 import { createContext, useContext, useState, useCallback } from 'react';
 import { aiAPI } from '../services/api';
 

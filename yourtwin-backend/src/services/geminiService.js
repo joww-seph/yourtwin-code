@@ -3,15 +3,22 @@ import axios from 'axios';
 // Read env vars lazily (after dotenv.config() has run)
 const getConfig = () => ({
   apiKey: process.env.GEMINI_API_KEY,
-  model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
   baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-  timeout: parseInt(process.env.GEMINI_TIMEOUT) || 30000
+  timeout: parseInt(process.env.GEMINI_TIMEOUT) || 30000,
+  // Cascading fallback models (most capable to lite)
+  models: [
+    process.env.GEMINI_MODEL_PRIMARY || 'gemini-3-flash',
+    process.env.GEMINI_MODEL_SECONDARY || 'gemini-2.5-flash',
+    process.env.GEMINI_MODEL_TERTIARY || 'gemini-2.5-flash-lite'
+  ]
 });
 
-// Rate limiting (free tier: 60 RPM)
+// Get primary model (for backwards compatibility)
+const getPrimaryModel = () => getConfig().models[0];
+
+// Rate limiting tracking (for info only, not blocking)
 let requestCount = 0;
 let lastResetTime = Date.now();
-const RATE_LIMIT = 60;
 const RATE_WINDOW = 60000; // 1 minute
 
 // Check if Gemini API is configured
@@ -20,14 +27,14 @@ export const isConfigured = () => {
   return !!apiKey && apiKey.length > 0;
 };
 
-// Check rate limit
-const checkRateLimit = () => {
+// Track rate limit (info only, doesn't block)
+const trackRequest = () => {
   const now = Date.now();
   if (now - lastResetTime > RATE_WINDOW) {
     requestCount = 0;
     lastResetTime = now;
   }
-  return requestCount < RATE_LIMIT;
+  requestCount++;
 };
 
 // Convert messages to Gemini format
@@ -52,28 +59,17 @@ const convertToGeminiFormat = (messages) => {
   return { contents, systemInstruction: systemMessage?.content };
 };
 
-// Generate chat completion
+// Generate chat completion (single model)
 export const generateCompletion = async (messages, options = {}) => {
   const config = getConfig();
 
   if (!isConfigured()) {
-    throw {
-      success: false,
-      error: 'Gemini API key not configured',
-      code: 'GEMINI_NOT_CONFIGURED'
-    };
-  }
-
-  if (!checkRateLimit()) {
-    throw {
-      success: false,
-      error: 'Rate limit exceeded',
-      code: 'RATE_LIMIT_EXCEEDED'
-    };
+    console.log('⚠️ [Gemini] API key not configured');
+    return { success: false, error: 'Gemini API key not configured', code: 'GEMINI_NOT_CONFIGURED' };
   }
 
   const {
-    model = config.model,
+    model = getPrimaryModel(),
     temperature = 0.7,
     maxTokens = 1024
   } = options;
@@ -87,28 +83,8 @@ export const generateCompletion = async (messages, options = {}) => {
       contents,
       generationConfig: {
         temperature,
-        maxOutputTokens: maxTokens,
-        topP: 0.95,
-        topK: 40
-      },
-      safetySettings: [
-        {
-          category: 'HARM_CATEGORY_HARASSMENT',
-          threshold: 'BLOCK_ONLY_HIGH'
-        },
-        {
-          category: 'HARM_CATEGORY_HATE_SPEECH',
-          threshold: 'BLOCK_ONLY_HIGH'
-        },
-        {
-          category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-          threshold: 'BLOCK_ONLY_HIGH'
-        },
-        {
-          category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-          threshold: 'BLOCK_ONLY_HIGH'
-        }
-      ]
+        maxOutputTokens: maxTokens
+      }
     };
 
     // Add system instruction if present
@@ -118,19 +94,17 @@ export const generateCompletion = async (messages, options = {}) => {
       };
     }
 
-    const response = await axios.post(
-      `${config.baseUrl}/models/${model}:generateContent`,
-      requestBody,
-      {
-        timeout: config.timeout,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-goog-api-key': config.apiKey
-        }
-      }
-    );
+    const url = `${config.baseUrl}/models/${model}:generateContent`;
 
-    requestCount++;
+    const response = await axios.post(url, requestBody, {
+      timeout: config.timeout,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-goog-api-key': config.apiKey
+      }
+    });
+
+    trackRequest();
     const responseTime = Date.now() - startTime;
 
     const candidate = response.data.candidates?.[0];
@@ -154,27 +128,20 @@ export const generateCompletion = async (messages, options = {}) => {
   } catch (error) {
     const responseTime = Date.now() - startTime;
 
-    // Handle specific Gemini errors
+    // Log the actual error for debugging
+    console.error('❌ [Gemini] API Error:', error.response?.status, error.response?.data?.error?.message || error.message);
+
+    // Return error object instead of throwing (more graceful handling)
     if (error.response?.status === 429) {
-      throw {
-        success: false,
-        error: 'Gemini rate limit exceeded',
-        code: 'RATE_LIMIT_EXCEEDED',
-        responseTime
-      };
+      return { success: false, error: 'Gemini API rate limit exceeded (try again in a minute)', code: 'RATE_LIMIT_EXCEEDED', responseTime };
     }
 
     if (error.response?.status === 403) {
-      throw {
-        success: false,
-        error: 'Invalid Gemini API key',
-        code: 'INVALID_API_KEY',
-        responseTime
-      };
+      return { success: false, error: 'Invalid Gemini API key', code: 'INVALID_API_KEY', responseTime };
     }
 
     if (error.response?.data?.error) {
-      throw {
+      return {
         success: false,
         error: error.response.data.error.message || 'Gemini API error',
         code: error.response.data.error.code || 'GEMINI_ERROR',
@@ -182,13 +149,92 @@ export const generateCompletion = async (messages, options = {}) => {
       };
     }
 
-    throw {
-      success: false,
-      error: error.message,
-      code: error.code || 'GEMINI_ERROR',
-      responseTime
-    };
+    return { success: false, error: error.message, code: error.code || 'GEMINI_ERROR', responseTime };
   }
+};
+
+/**
+ * Generate completion with cascading fallback
+ * Tries each model in order until one succeeds
+ * Models: gemini-3-flash → gemini-2.5-flash → gemini-2.5-flash-lite
+ */
+export const generateCompletionWithFallback = async (messages, options = {}) => {
+  const config = getConfig();
+
+  if (!isConfigured()) {
+    console.log('⚠️ [Gemini] API key not configured');
+    return { success: false, error: 'Gemini API key not configured', code: 'GEMINI_NOT_CONFIGURED' };
+  }
+
+  const { temperature = 0.7, maxTokens = 1024 } = options;
+  const models = config.models;
+  const errors = [];
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    const isLastModel = i === models.length - 1;
+
+    try {
+      console.log(`🔄 [Gemini] Trying model ${i + 1}/${models.length}: ${model}`);
+
+      const result = await generateCompletion(messages, {
+        model,
+        temperature,
+        maxTokens
+      });
+
+      if (result.success) {
+        if (i > 0) {
+          console.log(`✅ [Gemini] Fallback succeeded with model: ${model}`);
+        }
+        return {
+          ...result,
+          fallbackLevel: i, // 0 = primary, 1 = secondary, 2 = tertiary
+          modelsAttempted: i + 1
+        };
+      }
+
+      // Model failed, record error and try next
+      errors.push({ model, error: result.error, code: result.code });
+      console.log(`⚠️ [Gemini] Model ${model} failed: ${result.error}`);
+
+      // If rate limited, try next model immediately
+      if (result.code === 'RATE_LIMIT_EXCEEDED' && !isLastModel) {
+        console.log(`↪️ [Gemini] Rate limited, trying next model...`);
+        continue;
+      }
+
+      // For other errors on last model, return the error
+      if (isLastModel) {
+        return {
+          success: false,
+          error: `All ${models.length} Gemini models failed`,
+          errors,
+          code: 'ALL_MODELS_FAILED'
+        };
+      }
+    } catch (err) {
+      errors.push({ model, error: err.message, code: 'EXCEPTION' });
+      console.error(`❌ [Gemini] Exception with ${model}:`, err.message);
+
+      if (isLastModel) {
+        return {
+          success: false,
+          error: `All ${models.length} Gemini models failed with exceptions`,
+          errors,
+          code: 'ALL_MODELS_FAILED'
+        };
+      }
+    }
+  }
+
+  // Should not reach here, but just in case
+  return {
+    success: false,
+    error: 'No Gemini models available',
+    errors,
+    code: 'NO_MODELS'
+  };
 };
 
 // Generate with streaming (for real-time UI updates)
@@ -196,23 +242,11 @@ export const generateStream = async (messages, onChunk, options = {}) => {
   const config = getConfig();
 
   if (!isConfigured()) {
-    throw {
-      success: false,
-      error: 'Gemini API key not configured',
-      code: 'GEMINI_NOT_CONFIGURED'
-    };
-  }
-
-  if (!checkRateLimit()) {
-    throw {
-      success: false,
-      error: 'Rate limit exceeded',
-      code: 'RATE_LIMIT_EXCEEDED'
-    };
+    return { success: false, error: 'Gemini API key not configured', code: 'GEMINI_NOT_CONFIGURED' };
   }
 
   const {
-    model = config.model,
+    model = getPrimaryModel(),
     temperature = 0.7,
     maxTokens = 1024
   } = options;
@@ -247,7 +281,7 @@ export const generateStream = async (messages, onChunk, options = {}) => {
       }
     );
 
-    requestCount++;
+    trackRequest();
     let fullContent = '';
 
     return new Promise((resolve, reject) => {
@@ -288,15 +322,12 @@ export const generateStream = async (messages, onChunk, options = {}) => {
       });
     });
   } catch (error) {
-    throw {
-      success: false,
-      error: error.message,
-      code: error.code || 'GEMINI_STREAM_ERROR'
-    };
+    console.error('❌ [Gemini Stream] Error:', error.message);
+    return { success: false, error: error.message, code: error.code || 'GEMINI_STREAM_ERROR' };
   }
 };
 
-// Get current rate limit status
+// Get current rate limit status (for monitoring)
 export const getRateLimitStatus = () => {
   const now = Date.now();
   if (now - lastResetTime > RATE_WINDOW) {
@@ -306,7 +337,7 @@ export const getRateLimitStatus = () => {
 
   return {
     requestsUsed: requestCount,
-    requestsRemaining: RATE_LIMIT - requestCount,
+    requestsRemaining: 60 - requestCount, // Free tier: ~60 RPM
     resetsIn: Math.max(0, RATE_WINDOW - (now - lastResetTime))
   };
 };
@@ -321,10 +352,15 @@ export const estimateCost = (promptTokens, completionTokens) => {
   return inputCost + outputCost;
 };
 
+// Get configured model list
+export const getModelList = () => getConfig().models;
+
 export default {
   isConfigured,
   generateCompletion,
+  generateCompletionWithFallback,
   generateStream,
   getRateLimitStatus,
+  getModelList,
   estimateCost
 };

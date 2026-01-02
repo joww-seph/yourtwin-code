@@ -35,7 +35,35 @@ build/
 # Claude Code
 .claude/
 
-# Convenience batch files (local use only)
+# Batch files (local convenience scripts)
 *.bat
-!start-tunnel.bat
-!start-cloudflare-tunnel.bat
+
+# Python virtual environment
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ML model checkpoints and logs (generated during training)
+checkpoints/
+model_registry/
+*.ckpt
+*.pth
+
+# Documentation files (keep only README.md)
+CHECKLIST.md
+MINDSPORE_GAMEPLAN.md
+Comparison-Analysis.md
+deisgn report.md
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/

@@ -1,35 +1,51 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import AutoLogoutWrapper from './components/AutoLogoutWrapper';
+import ErrorBoundary from './components/ErrorBoundary';
 
+// Loading fallback component
+const PageLoader = () => (
+  <div className="min-h-screen bg-[#1e1e2e] flex items-center justify-center">
+    <div className="text-center">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#89b4fa] mx-auto mb-4"></div>
+      <p className="text-[#6c7086] text-sm">Loading...</p>
+    </div>
+  </div>
+);
+
+// Auth pages (not lazy loaded for fast initial load)
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 
-// Student pages
-import StudentDashboard from './pages/StudentDashboard';
-import ActivityPage from './pages/ActivityPage';
-import MyProgress from './pages/MyProgress';
-import EditProfile from './pages/EditProfile';
-import StudentSessionActivities from './pages/StudentSessionActivities';
-import SandboxPage from './pages/SandboxPage';
+// Student pages (lazy loaded)
+const StudentDashboard = lazy(() => import('./pages/StudentDashboard'));
+const ActivityPage = lazy(() => import('./pages/ActivityPage'));
+const MyProgress = lazy(() => import('./pages/MyProgress'));
+const EditProfile = lazy(() => import('./pages/EditProfile'));
+const StudentSessionActivities = lazy(() => import('./pages/StudentSessionActivities'));
+const SandboxPage = lazy(() => import('./pages/SandboxPage'));
+const DigitalTwinPage = lazy(() => import('./pages/DigitalTwinPage'));
 
-// Instructor pages
-import InstructorDashboard from './pages/InstructorDashboard';
-import LabSessionsPage from './pages/LabSessionsPage';
-import LabSessionDetailPage from './pages/LabSessionDetailPage';
-import CreateEditLabSession from './pages/CreateEditLabSession';
-import AnalyticsDashboard from './pages/AnalyticsDashboard';
+// Instructor pages (lazy loaded)
+const InstructorDashboard = lazy(() => import('./pages/InstructorDashboard'));
+const LabSessionsPage = lazy(() => import('./pages/LabSessionsPage'));
+const LabSessionDetailPage = lazy(() => import('./pages/LabSessionDetailPage'));
+const CreateEditLabSession = lazy(() => import('./pages/CreateEditLabSession'));
+const AnalyticsDashboard = lazy(() => import('./pages/AnalyticsDashboard'));
 
 function App() {
   return (
-    <AuthProvider>
-      <SocketProvider>
-        <AutoLogoutWrapper>
-          <Router>
+    <ErrorBoundary>
+      <AuthProvider>
+        <SocketProvider>
+          <AutoLogoutWrapper>
+            <Router>
+              <Suspense fallback={<PageLoader />}>
             <Routes>
 
           {/* ---------- Public ---------- */}
@@ -99,6 +115,15 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['student']}>
                 <SandboxPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/student/twin"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <DigitalTwinPage />
               </ProtectedRoute>
             }
           />
@@ -202,11 +227,13 @@ function App() {
             }
           />
 
-            </Routes>
-          </Router>
-        </AutoLogoutWrapper>
-      </SocketProvider>
-    </AuthProvider>
+              </Routes>
+              </Suspense>
+            </Router>
+          </AutoLogoutWrapper>
+        </SocketProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -1,0 +1,95 @@
+# YourTwin ML Service Configuration
+# MindSpore Digital Twin Integration
+
+service:
+  name: yourtwin-ml
+  version: "1.0.0"
+  host: "0.0.0.0"
+  port: 5001
+  debug: false
+
+# MongoDB Connection
+database:
+  uri: ${MONGODB_URI:-mongodb://localhost:27017/yourtwin}
+  name: yourtwin
+
+# Redis Cache (optional)
+cache:
+  enabled: false
+  uri: ${REDIS_URI:-redis://localhost:6379}
+  ttl: 300  # seconds
+
+# Model Configuration
+models:
+  storage_path: ${MODEL_PATH:-./models}
+
+  behavior_prediction:
+    enabled: true
+    input_dim: 20
+    hidden_dim: 64
+    num_layers: 2
+    sequence_length: 10
+
+  knowledge_graph:
+    enabled: false  # Phase 2
+    embed_dim: 128
+    num_heads: 4
+
+  learning_path:
+    enabled: false  # Phase 2
+    state_dim: 50
+    action_dim: 100
+
+  anomaly_detection:
+    enabled: true
+    input_dim: 15
+    latent_dim: 8
+    threshold: 2.5  # reconstruction error threshold
+
+# Feature Extraction
+features:
+  behavioral:
+    - avg_typing_speed
+    - avg_thinking_pause
+    - paste_frequency
+    - active_time_percentage
+    - coding_pattern_type
+    - tab_switch_count
+    - idle_time_percentage
+
+  performance:
+    - success_rate
+    - avg_score
+    - difficulty_progression
+    - time_per_problem
+    - attempt_count
+    - completion_rate
+
+  ai_interaction:
+    - hint_request_frequency
+    - hint_level_distribution
+    - ai_dependency_score
+    - hints_before_success
+    - comprehension_pass_rate
+
+  temporal:
+    - session_duration
+    - time_between_sessions
+    - activity_time_of_day
+    - weekly_activity_pattern
+    - learning_velocity
+
+# Training Configuration
+training:
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.001
+  validation_split: 0.2
+  early_stopping_patience: 10
+  lookback_days: 90
+
+# Logging
+logging:
+  level: INFO
+  format: "{time} | {level} | {message}"
+  file: logs/ml_service.log

@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   submitCode,
+  runCode,
   getMySubmissions,
   getSubmission,
   getAllMySubmissions,
@@ -13,6 +14,7 @@ import { authenticate } from '../middleware/auth.js';
 const router = express.Router();
 
 router.post('/', authenticate, submitCode);
+router.post('/run', authenticate, runCode); // Run tests without creating submission
 router.post('/sandbox', authenticate, runSandbox);
 router.get('/my', authenticate, getAllMySubmissions);
 router.get('/stats', authenticate, getStudentStats);

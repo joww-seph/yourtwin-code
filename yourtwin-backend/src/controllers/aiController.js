@@ -6,6 +6,7 @@ import AIUsage from '../models/AIUsage.js';
 import * as aiService from '../services/aiService.js';
 import * as requestEvaluator from '../services/requestEvaluator.js';
 import { SYSTEM_PROMPT, buildHintPrompt, COMPREHENSION_PROMPT, cleanAIResponse } from '../templates/hintPrompts.js';
+import { emitToAllInstructors, emitToLabSession } from '../utils/socket.js';
 
 // Request a hint
 export const requestHint = async (req, res) => {
@@ -115,6 +116,25 @@ export const requestHint = async (req, res) => {
         { upsert: true }
       )
     ]);
+
+    // Emit real-time hint request event to instructors
+    const hintEvent = {
+      hintId: hintRequest._id,
+      studentId: student._id,
+      studentName: `${req.user.firstName} ${req.user.lastName}`,
+      activityId: activity._id,
+      activityTitle: activity.title,
+      labSessionId: activity.labSession,
+      hintLevel: level,
+      timestamp: new Date()
+    };
+
+    // Emit to lab session room and all instructors
+    if (activity.labSession) {
+      emitToLabSession(activity.labSession, 'hint-requested', hintEvent);
+    }
+    emitToAllInstructors('hint-requested', hintEvent);
+    console.log(`📡 [Socket] Hint request event emitted for ${req.user.firstName} - Activity: ${activity.title} - Level: ${level}`);
 
     res.json({
       success: true,

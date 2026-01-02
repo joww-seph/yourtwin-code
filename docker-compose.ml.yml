@@ -1,0 +1,43 @@
+# Docker Compose - MindSpore ML Service Extension
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.ml.yml up
+
+version: '3.8'
+
+services:
+  # MindSpore ML Service
+  yourtwin-ml:
+    build:
+      context: ./yourtwin-ml
+      dockerfile: Dockerfile
+    container_name: yourtwin-ml
+    ports:
+      - "5001:5001"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/yourtwin
+      - ML_SERVICE_PORT=5001
+      - MODEL_PATH=/models
+      - LOG_LEVEL=INFO
+    volumes:
+      - ml-models:/models
+      - ml-logs:/app/logs
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Override backend to include ML service URL
+  yourtwin-backend:
+    environment:
+      - ML_SERVICE_URL=http://yourtwin-ml:5001
+      - ML_SERVICE_ENABLED=true
+
+volumes:
+  ml-models:
+    driver: local
+  ml-logs:
+    driver: local

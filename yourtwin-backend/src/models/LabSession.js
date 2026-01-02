@@ -23,8 +23,7 @@ const labSessionSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  // DENORMALIZED: Course/Year/Section from enrolled students
-  // These define the target audience and are used for filtering
+  // Target audience for this session
   course: {
     type: String,
     enum: ['BSIT', 'BSCS', 'BSIS', 'ACT'],
@@ -36,10 +35,18 @@ const labSessionSchema = new mongoose.Schema({
     min: 1,
     max: 4
   },
-  section: {
+  // Multiple sections can access a single lab session
+  sections: [{
     type: String,
-    required: true,
-    uppercase: true
+    uppercase: true,
+    trim: true
+  }],
+  // Programming language for all activities in this session
+  language: {
+    type: String,
+    enum: ['c', 'cpp', 'java', 'python'],
+    required: [true, 'Programming language is required'],
+    default: 'python'
   },
   // Scheduling
   scheduledDate: {
@@ -54,27 +61,24 @@ const labSessionSchema = new mongoose.Schema({
     type: String,
     required: true // Format: "17:00"
   },
+  // Extended end time (for when instructor extends the session)
+  extendedEndTime: {
+    type: String,
+    default: null // Format: "18:00" - if set, overrides endTime
+  },
   room: {
     type: String,
     trim: true
   },
-  // Status flags
-  status: {
-    type: String,
-    enum: ['scheduled', 'ongoing', 'completed', 'cancelled'],
-    default: 'scheduled'
-  },
+  // Session is active when instructor enables it
   isActive: {
     type: Boolean,
-    default: false // Sessions start inactive until instructor activates
+    default: true // Sessions are active by default
   },
-  // Late submission settings
-  allowLateSubmission: {
+  // Manually marked as complete by instructor
+  isCompleted: {
     type: Boolean,
     default: false
-  },
-  lateSubmissionDeadline: {
-    type: Date
   }
 }, {
   timestamps: true
@@ -94,15 +98,33 @@ labSessionSchema.virtual('enrollments', {
   foreignField: 'sessionId'
 });
 
+// Get effective end time (considers extensions)
+labSessionSchema.methods.getEffectiveEndTime = function() {
+  return this.extendedEndTime || this.endTime;
+};
+
+// Mark session as complete
+labSessionSchema.methods.markAsComplete = function() {
+  this.isCompleted = true;
+  this.isActive = false;
+  return this.save();
+};
+
+// Reopen a completed session
+labSessionSchema.methods.reopen = function() {
+  this.isCompleted = false;
+  this.isActive = true;
+  return this.save();
+};
+
 // Ensure virtuals are included in JSON
 labSessionSchema.set('toJSON', { virtuals: true });
 labSessionSchema.set('toObject', { virtuals: true });
 
 // Indexes for querying
 labSessionSchema.index({ instructor: 1, scheduledDate: -1 });
-labSessionSchema.index({ course: 1, yearLevel: 1, section: 1 });
-labSessionSchema.index({ status: 1, scheduledDate: 1 });
-labSessionSchema.index({ isActive: 1 });
+labSessionSchema.index({ course: 1, yearLevel: 1 });
+labSessionSchema.index({ isActive: 1, isCompleted: 1 });
 
 const LabSession = mongoose.model('LabSession', labSessionSchema);
 

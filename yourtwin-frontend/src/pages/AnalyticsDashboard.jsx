@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { analyticsAPI } from '../services/api';
+import Layout from '../components/Layout';
 import {
-  ArrowLeft,
   TrendingUp,
   Users,
   CheckCircle,
@@ -14,13 +12,14 @@ import {
   Calendar,
   Activity,
   RefreshCw,
-  BookOpen
+  BookOpen,
+  ArrowLeft
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 function AnalyticsDashboard() {
-  const { user } = useAuth();
-  const { socket } = useSocket();
   const navigate = useNavigate();
+  const { socket } = useSocket();
   const [analytics, setAnalytics] = useState(null);
   const [liveActivity, setLiveActivity] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,7 +30,7 @@ function AnalyticsDashboard() {
     fetchLiveActivity();
   }, []);
 
-  // Listen for real-time submission events
+  // Listen for real-time events
   useEffect(() => {
     if (socket) {
       const handleNewSubmission = (data) => {
@@ -51,10 +50,39 @@ function AnalyticsDashboard() {
         fetchAnalytics();
       };
 
+      const handleHintRequested = (data) => {
+        console.log('📡 Hint requested:', data);
+        // Add to live activity
+        setLiveActivity(prev => [{
+          _id: data.hintId || Date.now(),
+          type: 'hint',
+          studentName: data.studentName,
+          activityTitle: data.activityTitle,
+          hintLevel: data.hintLevel,
+          timestamp: data.timestamp
+        }, ...prev.slice(0, 49)]);
+      };
+
+      const handleStudentJoined = (data) => {
+        console.log('📡 Student joined session:', data);
+        // Add to live activity
+        setLiveActivity(prev => [{
+          _id: Date.now(),
+          type: 'join',
+          studentName: data.studentName,
+          sessionTitle: data.sessionTitle,
+          timestamp: data.timestamp
+        }, ...prev.slice(0, 49)]);
+      };
+
       socket.on('submission-created', handleNewSubmission);
+      socket.on('hint-requested', handleHintRequested);
+      socket.on('student-joined-session', handleStudentJoined);
 
       return () => {
         socket.off('submission-created');
+        socket.off('hint-requested');
+        socket.off('student-joined-session');
       };
     }
   }, [socket]);
@@ -87,48 +115,43 @@ function AnalyticsDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#1e1e2e] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#89b4fa]"></div>
-      </div>
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#89b4fa]"></div>
+        </div>
+      </Layout>
     );
   }
 
   const { overview, dailyStats, topicPerformance, difficultyBreakdown, recentSubmissions } = analytics || {};
 
   return (
-    <div className="min-h-screen bg-[#1e1e2e]">
-      {/* Header */}
-      <header className="bg-[#313244] border-b border-[#45475a] px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+    <Layout>
+      <div className="space-y-4">
+        {/* Header */}
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate('/instructor/dashboard')}
-              className="p-2 hover:bg-[#45475a] rounded-lg transition"
+              className="p-2 hover:bg-[#313244] rounded-lg transition"
+              title="Back to Dashboard"
             >
-              <ArrowLeft className="w-5 h-5 text-[#bac2de]" />
+              <ArrowLeft className="w-5 h-5 text-[#cdd6f4]" />
             </button>
             <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] bg-clip-text text-transparent">
-                Analytics Dashboard
-              </h1>
-              <p className="text-sm text-[#bac2de] mt-1">
-                Real-time insights into student performance
-              </p>
+              <h1 className="text-2xl font-bold text-[#cdd6f4]">Analytics Dashboard</h1>
+              <p className="text-sm text-[#a6adc8]">Real-time insights into student performance</p>
             </div>
           </div>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2 bg-[#45475a] hover:bg-[#585b70] rounded-lg transition text-[#cdd6f4]"
+            className="flex items-center gap-2 px-4 py-2 bg-[#313244] hover:bg-[#45475a] rounded-lg transition text-sm text-[#cdd6f4]"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Overview Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
           <StatCard
@@ -390,8 +413,8 @@ function AnalyticsDashboard() {
             <p className="text-[#6c7086] text-center py-8">No submissions yet</p>
           )}
         </div>
-      </main>
-    </div>
+      </div>
+    </Layout>
   );
 }
 

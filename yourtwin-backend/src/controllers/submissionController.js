@@ -5,15 +5,19 @@ import TestResult from '../models/TestResult.js';
 import Student from '../models/Student.js';
 import StudentTwin from '../models/StudentTwin.js';
 import StudentCompetency from '../models/StudentCompetency.js';
+import CodeSnapshot from '../models/CodeSnapshot.js';
+import HintRequest from '../models/HintRequest.js';
 import LabSession from '../models/LabSession.js';
 import { runTestCases, executeCode, LANGUAGE_IDS } from '../services/judge0Service.js';
 import { emitToLabSession, emitToUser, emitToAllInstructors } from '../utils/socket.js';
+import { analyzeCode } from '../utils/codeAnalyzer.js';
+import { queueForValidation } from '../services/backgroundValidationService.js';
 
 // @desc    Submit code for an activity
 // @route   POST /api/submissions
 export const submitCode = async (req, res) => {
   try {
-    const { activityId, code, language, timeSpent } = req.body;
+    const { activityId, code, language, timeSpent, behavioralData } = req.body;
 
     // Get student profile
     const studentProfile = await Student.findOne({ userId: req.user._id });
@@ -107,6 +111,24 @@ export const submitCode = async (req, res) => {
     // Calculate total execution time
     const executionTime = testResultsData.reduce((sum, r) => sum + r.executionTime, 0);
 
+    // Analyze code for suspicious patterns (hardcoded outputs, etc.) - Fast static analysis
+    let codeAnalysis = null;
+    let isSuspicious = false;
+    try {
+      // Static code analysis (fast, ~10ms)
+      codeAnalysis = analyzeCode(code, language, testCases, activity.type);
+      isSuspicious = codeAnalysis.isSuspicious;
+
+      if (isSuspicious && status === 'passed') {
+        console.log(`🚨 [Code Analysis] Static analysis flagged submission for activity ${activityId}:`,
+          codeAnalysis.flags.map(f => f.type).join(', '));
+      }
+    } catch (analysisError) {
+      console.error('Code analysis failed:', analysisError);
+    }
+
+    // Note: AI validation runs in background after submission is created
+
     // Get attempt number
     const previousSubmissions = await Submission.countDocuments({
       studentId: studentProfile._id,
@@ -126,25 +148,101 @@ export const submitCode = async (req, res) => {
       attemptNumber: previousSubmissions + 1,
       timeSpent: timeSpent || 0,
       compileError,
-      runtimeError
+      runtimeError,
+      codeAnalysis: codeAnalysis ? {
+        isSuspicious: codeAnalysis.isSuspicious,
+        suspicionScore: codeAnalysis.suspicionScore,
+        flags: codeAnalysis.flags.map(f => ({
+          type: f.type,
+          severity: f.severity,
+          description: f.description
+        }))
+      } : undefined
     });
 
     // Create test results
     await TestResult.createForSubmission(submission._id, testResultsData);
 
+    // Queue for background AI validation if passed (non-blocking)
+    if (status === 'passed') {
+      queueForValidation(submission._id);
+    }
+
     // Update best score
     await Submission.updateBestScore(studentProfile._id, activityId);
 
-    // Update student competency and twin
+    // Get hint count for this activity
+    const hintsUsed = await HintRequest.countHintsUsed(studentProfile._id, activityId);
+
+    // Update student competency with difficulty weighting
     if (activity.topic) {
-      await StudentCompetency.updateFromSubmission(
+      await StudentCompetency.updateFromSubmissionWithDifficulty(
         studentProfile._id,
         activity.topic,
-        status === 'passed'
+        status === 'passed',
+        activity.difficulty || 'medium'
       );
 
-      const twin = await StudentTwin.getOrCreate(studentProfile._id);
-      await twin.recordActivity(status === 'passed', 0);
+      // Apply competency decay check (runs periodically)
+      await StudentCompetency.applyDecayForStudent(studentProfile._id);
+    }
+
+    // Always update the StudentTwin with activity and behavioral data
+    const twin = await StudentTwin.getOrCreate(studentProfile._id);
+    await twin.recordActivity(
+      status === 'passed',
+      0, // AI requests tracked separately
+      activity.difficulty || 'medium',
+      hintsUsed
+    );
+
+    // Update behavioral data if provided
+    if (behavioralData) {
+      await twin.updateBehavioralData(behavioralData);
+    }
+
+    // Create code snapshot for revision tracking
+    try {
+      await CodeSnapshot.createSnapshot({
+        studentId: studentProfile._id,
+        activityId: activityId,
+        labSessionId: activity.labSession,
+        code,
+        language,
+        snapshotType: 'submit',
+        behavioralContext: behavioralData ? {
+          keystrokesSinceLastSnapshot: behavioralData.totalKeystrokes || 0,
+          pasteEventsSinceLastSnapshot: behavioralData.pasteEvents || 0,
+          idleTimeSinceLastSnapshot: behavioralData.idleTime || 0
+        } : {}
+      });
+
+      // Analyze revision patterns and update twin
+      const revisionAnalysis = await CodeSnapshot.analyzeRevisionPatterns(
+        studentProfile._id,
+        activityId
+      );
+      await twin.updateCodeRevisionMetrics(revisionAnalysis);
+    } catch (snapshotError) {
+      console.warn('Code snapshot creation failed:', snapshotError.message);
+    }
+
+    // If passed, mark any hints for this activity as successful
+    if (status === 'passed' && hintsUsed > 0) {
+      try {
+        // Mark hints as leading to success
+        await HintRequest.updateMany(
+          { studentId: studentProfile._id, activityId: activityId, ledToSuccess: { $ne: true } },
+          { $set: { ledToSuccess: true } }
+        );
+        // Update twin's successful hints count
+        await twin.recordSuccessfulHint();
+      } catch (hintUpdateError) {
+        console.warn('Hint success update failed:', hintUpdateError.message);
+      }
+    }
+
+    if (activity.topic) {
       await twin.updateInsights();
     }
 
@@ -204,7 +302,12 @@ export const submitCode = async (req, res) => {
         testResults,
         score,
         status,
-        submission
+        submission,
+        codeAnalysis: codeAnalysis ? {
+          isSuspicious: codeAnalysis.isSuspicious,
+          suspicionScore: codeAnalysis.suspicionScore,
+          flags: codeAnalysis.flags
+        } : null
       }
     });
   } catch (error) {
@@ -574,6 +677,129 @@ export const getStudentStats = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch student stats',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Run code against test cases WITHOUT creating a submission (for practice runs)
+// @route   POST /api/submissions/run
+export const runCode = async (req, res) => {
+  try {
+    const { activityId, code, language } = req.body;
+
+    // Get activity with test cases
+    const activity = await Activity.findById(activityId).populate('testCases');
+    if (!activity || !activity.isActive) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found or is no longer available'
+      });
+    }
+
+    // Get language ID for Judge0
+    const languageId = LANGUAGE_IDS[language];
+    if (!languageId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid programming language'
+      });
+    }
+
+    // Get test cases
+    const testCases = await TestCase.getByActivity(activityId);
+    if (testCases.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No test cases defined for this activity'
+      });
+    }
+
+    // Run code against test cases
+    const testCasesForJudge = testCases.map(tc => ({
+      input: tc.input,
+      expectedOutput: tc.expectedOutput
+    }));
+    const judgeResults = await runTestCases(code, languageId, testCasesForJudge);
+
+    // Calculate score using weights
+    const totalWeight = testCases.reduce((sum, tc) => sum + tc.weight, 0);
+    let earnedWeight = 0;
+    const testResultsData = [];
+
+    for (let i = 0; i < testCases.length; i++) {
+      const tc = testCases[i];
+      const result = judgeResults[i];
+
+      if (result.passed) {
+        earnedWeight += tc.weight;
+      }
+
+      testResultsData.push({
+        testCase: i + 1,
+        input: tc.input,
+        expectedOutput: tc.expectedOutput,
+        actualOutput: result.actualOutput || '',
+        passed: result.passed,
+        executionTime: parseFloat(result.executionTime) || 0,
+        memoryUsed: result.memory || 0,
+        errorMessage: result.stderr || result.compileOutput || null,
+        stderr: result.stderr || null,
+        compileOutput: result.compileOutput || null,
+        isHidden: tc.isHidden
+      });
+    }
+
+    const score = totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * 100) : 0;
+    const passedTests = testResultsData.filter(r => r.passed).length;
+
+    // Determine overall status
+    let status = 'failed';
+    let compileError = null;
+    let runtimeError = null;
+
+    if (passedTests === testCases.length) {
+      status = 'passed';
+    } else if (judgeResults.some(r => r.compileOutput)) {
+      status = 'error';
+      compileError = judgeResults.find(r => r.compileOutput)?.compileOutput;
+    } else if (judgeResults.some(r => r.stderr)) {
+      status = 'error';
+      runtimeError = judgeResults.find(r => r.stderr)?.stderr;
+    }
+
+    // Build test execution log for frontend compatibility
+    const testExecutionLog = testResultsData.map((result, index) => ({
+      testCase: index + 1,
+      step: result.passed ? 'PASSED' : 'FAILED',
+      timestamp: new Date(),
+      output: result.actualOutput || result.compileOutput || result.errorMessage || 'No output',
+      expected: result.expectedOutput,
+      actual: result.actualOutput,
+      input: result.input,
+      passed: result.passed,
+      isHidden: result.isHidden
+    }));
+
+    res.json({
+      success: true,
+      message: status === 'passed' ? 'All tests passed!' : 'Some tests failed',
+      data: {
+        compileError,
+        runtimeError,
+        testExecutionLog,
+        score,
+        status,
+        passedTests,
+        totalTests: testCases.length,
+        isRunOnly: true // Flag to indicate this was a run, not a submission
+      }
+    });
+  } catch (error) {
+    console.error('Run code error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to run code',
       error: error.message
     });
   }

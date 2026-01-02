@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { authAPI } from '../services/api';
-import { ArrowLeft, User, Lock, AlertCircle, CheckCircle } from 'lucide-react';
+import Layout from '../components/Layout';
+import { User, Lock, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react';
 
 function EditProfile() {
   const { user, loadUser } = useAuth();
   const navigate = useNavigate();
-  
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -16,7 +17,7 @@ function EditProfile() {
     newPassword: '',
     confirmPassword: ''
   });
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -46,7 +47,6 @@ function EditProfile() {
     setError('');
     setSuccess('');
 
-    // Validate passwords if changing
     if (formData.newPassword || formData.confirmPassword) {
       if (!formData.currentPassword) {
         setError('Current password is required to change password');
@@ -71,7 +71,6 @@ function EditProfile() {
         middleName: formData.middleName
       };
 
-      // Only include password if provided
       if (formData.newPassword) {
         updateData.password = formData.newPassword;
       }
@@ -80,14 +79,12 @@ function EditProfile() {
 
       if (response.data.success) {
         setSuccess('Profile updated successfully!');
-        // Clear password fields
         setFormData({
           ...formData,
           currentPassword: '',
           newPassword: '',
           confirmPassword: ''
         });
-        // Reload user data
         if (loadUser) loadUser();
       }
     } catch (err) {
@@ -97,26 +94,25 @@ function EditProfile() {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[#1e1e2e]">
-      {/* Header */}
-      <header className="bg-[#313244] border-b border-[#45475a] px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => navigate(-1)}
-              className="p-2 hover:bg-[#45475a] rounded-lg transition"
-            >
-              <ArrowLeft className="w-5 h-5 text-[#bac2de]" />
-            </button>
-            <h1 className="text-xl font-bold text-[#cdd6f4]">Edit Profile</h1>
-          </div>
-        </div>
-      </header>
+  const getDashboardRoute = () => {
+    return user?.role === 'instructor' ? '/instructor/dashboard' : '/student/dashboard';
+  };
 
-      {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        <div className="bg-[#313244] rounded-lg shadow-lg border border-[#45475a] p-6">
+  return (
+    <Layout>
+      <div className="max-w-2xl mx-auto">
+        <div className="flex items-center gap-4 mb-6">
+          <button
+            onClick={() => navigate(getDashboardRoute())}
+            className="p-2 hover:bg-[#313244] rounded-lg transition"
+            title="Back to Dashboard"
+          >
+            <ArrowLeft className="w-5 h-5 text-[#cdd6f4]" />
+          </button>
+          <h1 className="text-2xl font-bold text-[#cdd6f4]">Edit Profile</h1>
+        </div>
+
+        <div className="bg-[#181825] rounded-lg border border-[#313244] p-5">
           {/* Success Message */}
           {success && (
             <div className="mb-6 p-4 bg-[#a6e3a1]/10 border border-[#a6e3a1] rounded-lg flex items-start gap-3">
@@ -141,7 +137,7 @@ function EditProfile() {
                 <h2 className="text-lg font-bold text-[#cdd6f4]">Personal Information</h2>
               </div>
 
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
                     Last Name *
@@ -153,6 +149,7 @@ function EditProfile() {
                     onChange={handleChange}
                     required
                     disabled={loading}
+                    placeholder="Enter last name"
                     className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
                   />
                 </div>
@@ -168,6 +165,7 @@ function EditProfile() {
                     onChange={handleChange}
                     required
                     disabled={loading}
+                    placeholder="Enter first name"
                     className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
                   />
                 </div>
@@ -182,6 +180,7 @@ function EditProfile() {
                     value={formData.middleName}
                     onChange={handleChange}
                     disabled={loading}
+                    placeholder="Optional"
                     className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
                   />
                 </div>
@@ -198,7 +197,7 @@ function EditProfile() {
                 Leave blank if you don't want to change your password
               </p>
 
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
                     Current Password
@@ -210,13 +209,13 @@ function EditProfile() {
                     onChange={handleChange}
                     disabled={loading}
                     className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
-                    placeholder="••••••••"
+                    placeholder="Enter current password"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
-                    New Password
+                    New Password <span className="text-[#6c7086]">(min. 6)</span>
                   </label>
                   <input
                     type="password"
@@ -226,13 +225,13 @@ function EditProfile() {
                     disabled={loading}
                     minLength={6}
                     className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
-                    placeholder="••••••••"
+                    placeholder="Enter new password"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-[#cdd6f4] mb-2">
-                    Confirm New Password
+                    Confirm Password
                   </label>
                   <input
                     type="password"
@@ -242,7 +241,7 @@ function EditProfile() {
                     disabled={loading}
                     minLength={6}
                     className="w-full px-4 py-2 bg-[#1e1e2e] border border-[#45475a] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent text-[#cdd6f4] placeholder-[#6c7086] disabled:opacity-50"
-                    placeholder="••••••••"
+                    placeholder="Re-enter new password"
                   />
                 </div>
               </div>
@@ -254,18 +253,18 @@ function EditProfile() {
                 type="button"
                 onClick={() => navigate(-1)}
                 disabled={loading}
-                className="flex-1 px-6 py-3 bg-[#45475a] hover:bg-[#585b70] text-[#cdd6f4] rounded-lg font-medium transition disabled:opacity-50"
+                className="flex-1 px-4 py-2 bg-[#313244] hover:bg-[#45475a] text-[#cdd6f4] rounded-lg text-sm font-medium transition disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] text-[#1e1e2e] rounded-lg font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2 bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] text-[#1e1e2e] rounded-lg text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[#1e1e2e]"></div>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#1e1e2e]"></div>
                     Saving...
                   </>
                 ) : (
@@ -276,36 +275,34 @@ function EditProfile() {
           </form>
 
           {/* Read-Only Info */}
-          <div className="mt-6 pt-6 border-t border-[#45475a]">
-            <h3 className="text-sm font-medium text-[#bac2de] mb-3">Account Information (Read-Only)</h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-[#6c7086]">Email:</span>
-                <span className="text-[#cdd6f4]">{user?.email}</span>
-              </div>
+          <div className="mt-5 pt-5 border-t border-[#313244]">
+            <h3 className="text-sm font-medium text-[#6c7086] mb-3">Account Information</h3>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <span className="text-[#6c7086]">Email:</span>
+              <span className="text-[#cdd6f4]">{user?.email}</span>
               {user?.studentId && (
-                <div className="flex justify-between">
+                <>
                   <span className="text-[#6c7086]">Student ID:</span>
                   <span className="text-[#cdd6f4]">{user.studentId}</span>
-                </div>
+                </>
               )}
               {user?.course && (
-                <div className="flex justify-between">
+                <>
                   <span className="text-[#6c7086]">Course:</span>
                   <span className="text-[#cdd6f4]">{user.course}</span>
-                </div>
+                </>
               )}
               {user?.yearLevel && user?.section && (
-                <div className="flex justify-between">
+                <>
                   <span className="text-[#6c7086]">Year & Section:</span>
                   <span className="text-[#cdd6f4]">{user.yearLevel}-{user.section}</span>
-                </div>
+                </>
               )}
             </div>
           </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </Layout>
   );
 }
 

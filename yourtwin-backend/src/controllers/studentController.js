@@ -1,5 +1,7 @@
 import Student from '../models/Student.js';
 import User from '../models/User.js';
+import StudentTwin from '../models/StudentTwin.js';
+import StudentCompetency from '../models/StudentCompetency.js';
 
 // @desc    Search and filter students
 // @route   GET /api/students/search
@@ -100,6 +102,80 @@ export const getStudent = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch student',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get my profile with twin and competency data
+// @route   GET /api/students/me/profile
+export const getMyProfile = async (req, res) => {
+  try {
+    // Get student profile
+    const studentProfile = await Student.findOne({ userId: req.user._id })
+      .populate('userId', 'firstName lastName email');
+
+    if (!studentProfile) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student profile not found'
+      });
+    }
+
+    // Get or create student twin
+    const twin = await StudentTwin.getOrCreate(studentProfile._id);
+
+    // Get all competencies
+    const competencies = await StudentCompetency.find({ studentId: studentProfile._id })
+      .sort({ proficiencyLevel: -1 });
+
+    // Format competencies for visualization
+    const formattedCompetencies = competencies.map(c => ({
+      topic: c.topic,
+      proficiencyLevel: c.proficiencyLevel,
+      totalAttempts: c.totalAttempts,
+      successfulAttempts: c.successfulAttempts,
+      successRate: c.totalAttempts > 0
+        ? Math.round((c.successfulAttempts / c.totalAttempts) * 100)
+        : 0,
+      lastAttemptAt: c.lastAttemptAt
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        profile: {
+          _id: studentProfile._id,
+          studentId: studentProfile.studentId,
+          course: studentProfile.course,
+          section: studentProfile.section,
+          yearLevel: studentProfile.yearLevel,
+          firstName: studentProfile.userId.firstName,
+          lastName: studentProfile.userId.lastName,
+          email: studentProfile.userId.email
+        },
+        twin: {
+          personality: twin.personality,
+          preferredDifficulty: twin.preferredDifficulty,
+          averageTimePerProblem: twin.averageTimePerProblem,
+          strengths: twin.strengths,
+          weaknesses: twin.weaknesses,
+          recommendedTopics: twin.recommendedTopics,
+          behavioralData: twin.behavioralData,
+          learningVelocity: twin.learningVelocity,
+          totalAIRequests: twin.totalAIRequests,
+          totalActivitiesCompleted: twin.totalActivitiesCompleted,
+          totalActivitiesAttempted: twin.totalActivitiesAttempted,
+          lastActivityDate: twin.lastActivityDate
+        },
+        competencies: formattedCompetencies
+      }
+    });
+  } catch (error) {
+    console.error('Get my profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch profile',
       error: error.message
     });
   }

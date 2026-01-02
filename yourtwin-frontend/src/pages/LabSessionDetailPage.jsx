@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
+import Layout from '../components/Layout';
 import StudentSelector from '../components/StudentSelector';
 import CreateActivityModal from '../components/CreateActivityModal';
 import StudentProgressPanel from '../components/StudentProgressPanel';
-import { labSessionAPI, studentAPI, activityAPI } from '../services/api';
+import { labSessionAPI, activityAPI } from '../services/api';
 import { showSuccess, showError, showDeleteConfirm } from '../utils/sweetalert';
 import {
-  ArrowLeft,
   Plus,
   Trash2,
   Users,
@@ -20,18 +19,19 @@ import {
   PowerOff,
   Calendar,
   MapPin,
-  User,
   Edit3,
   Copy,
   AlertTriangle,
   BarChart3,
-  Shield
+  Shield,
+  ArrowLeft,
+  Eye
 } from 'lucide-react';
 import PlagiarismReport from '../components/PlagiarismReport';
+import SessionMonitoringPanel from '../components/SessionMonitoringPanel';
 
 function LabSessionDetailPage() {
   const { sessionId } = useParams();
-  const { user } = useAuth();
   const { socket } = useSocket();
   const navigate = useNavigate();
   const [session, setSession] = useState(null);
@@ -53,46 +53,54 @@ function LabSessionDetailPage() {
     fetchSessionDetails();
   }, [sessionId]);
 
-  // Listen for real-time updates
   useEffect(() => {
     if (socket) {
       const handleSessionUpdate = (data) => {
-        console.log('📡 [Session Detail] Session updated', data);
         if (data.sessionId === sessionId || data.sessionId?.toString() === sessionId) {
           fetchSessionDetails();
         }
       };
-
       const handleSessionDeleted = (data) => {
-        console.log('📡 [Session Detail] Session deleted', data);
         if (data.sessionId === sessionId || data.sessionId?.toString() === sessionId) {
           showError('Session Deleted', 'This session has been deleted.');
           navigate('/instructor/lab-sessions');
         }
       };
-
       const handleActivityUpdate = (data) => {
-        console.log('📡 [Session Detail] Activity updated', data);
+        if (data.sessionId === sessionId || data.sessionId?.toString() === sessionId) {
+          fetchSessionDetails();
+        }
+      };
+      const handleSubmissionCreated = (data) => {
+        if (data.sessionId === sessionId || data.sessionId?.toString() === sessionId) {
+          // Refresh session details to update progress
+          fetchSessionDetails();
+        }
+      };
+
+      // Handle auto-activation/deactivation status changes
+      const handleStatusChange = (data) => {
         if (data.sessionId === sessionId || data.sessionId?.toString() === sessionId) {
           fetchSessionDetails();
         }
       };
 
-      // Lab session events
       socket.on('lab-session-updated', handleSessionUpdate);
       socket.on('lab-session-deleted', handleSessionDeleted);
-
-      // Activity events
+      socket.on('lab-session-status-change', handleStatusChange); // Auto-activation/deactivation
       socket.on('activity-created', handleActivityUpdate);
       socket.on('activity-updated', handleActivityUpdate);
       socket.on('activity-deleted', handleActivityUpdate);
+      socket.on('submission-created', handleSubmissionCreated);
 
       return () => {
         socket.off('lab-session-updated');
         socket.off('lab-session-deleted');
+        socket.off('lab-session-status-change');
         socket.off('activity-created');
         socket.off('activity-updated');
         socket.off('activity-deleted');
+        socket.off('submission-created');
       };
     }
   }, [socket, sessionId, navigate]);
@@ -106,8 +114,7 @@ function LabSessionDetailPage() {
     } catch (error) {
       console.error('Failed to fetch session details:', error);
       if (error.response?.status === 403) {
-        console.error('❌ 403 Forbidden - You may not have access to this session');
-        showError('Access Denied', 'You do not have permission to access this session. Please check your account role.');
+        showError('Access Denied', 'You do not have permission to access this session.');
         navigate('/instructor/dashboard');
       }
     } finally {
@@ -115,37 +122,18 @@ function LabSessionDetailPage() {
     }
   };
 
-  const fetchAvailableStudents = async () => {
-    try {
-      const response = await studentAPI.search({});
-      return response.data.data || [];
-    } catch (error) {
-      console.error('Failed to fetch available students:', error);
-      return [];
-    }
-  };
-
   const handleAddStudents = async (studentIds) => {
     try {
       const response = await labSessionAPI.addStudents(sessionId, studentIds);
-      const { addedCount, failures, message } = response.data.data || {};
-
+      const { addedCount, message } = response.data.data || {};
       setShowAddStudents(false);
       fetchSessionDetails();
-
-      // Show appropriate message based on results
-      if (addedCount > 0 && (!failures || failures.length === 0)) {
+      if (addedCount > 0) {
         showSuccess(message || `${addedCount} student(s) added successfully!`);
-      } else if (addedCount > 0 && failures && failures.length > 0) {
-        // Partial success
-        showSuccess(message || `${addedCount} added, ${failures.length} failed`);
       }
     } catch (error) {
-      console.error('Failed to add students:', error);
-      // Extract error message from backend response
       const errorMessage = error.response?.data?.message || 'Failed to add students';
       showError('Failed to Add Students', errorMessage);
-      // Still refresh to show current state
       fetchSessionDetails();
     }
   };
@@ -153,11 +141,9 @@ function LabSessionDetailPage() {
   const handleRemoveStudent = async (studentId) => {
     try {
       await labSessionAPI.removeStudent(sessionId, studentId);
-
       fetchSessionDetails();
       showSuccess('Student removed successfully!');
     } catch (error) {
-      console.error('Failed to remove student:', error);
       showError('Failed to remove student', 'Please try again.');
     }
   };
@@ -167,11 +153,9 @@ function LabSessionDetailPage() {
     if (result.isConfirmed) {
       try {
         await activityAPI.delete(activityId);
-
         fetchSessionDetails();
         showSuccess('Activity deleted successfully!');
       } catch (error) {
-        console.error('Failed to delete activity:', error);
         showError('Failed to delete activity', 'Please try again.');
       }
     }
@@ -181,20 +165,17 @@ function LabSessionDetailPage() {
     setCreatingActivity(true);
     try {
       if (activityModalMode === 'edit' && editingActivity) {
-        // Update existing activity
         await activityAPI.update(editingActivity._id, activityData);
         showSuccess('Activity updated successfully!');
       } else {
-        // Create new activity (or duplicate)
         await labSessionAPI.createActivity(sessionId, activityData);
-        showSuccess(activityModalMode === 'duplicate' ? 'Activity duplicated successfully!' : 'Activity created successfully!');
+        showSuccess(activityModalMode === 'duplicate' ? 'Activity duplicated!' : 'Activity created!');
       }
       setShowActivityForm(false);
       setEditingActivity(null);
       setActivityModalMode('create');
       fetchSessionDetails();
     } catch (error) {
-      console.error('Failed to save activity:', error);
       showError('Failed to save activity', 'Please try again.');
     } finally {
       setCreatingActivity(false);
@@ -228,7 +209,6 @@ function LabSessionDetailPage() {
         showSuccess('Lab session deleted successfully!');
         navigate('/instructor/dashboard');
       } catch (error) {
-        console.error('Failed to delete session:', error);
         showError('Failed to delete session', 'Please try again.');
       } finally {
         setDeletingSession(false);
@@ -248,42 +228,28 @@ function LabSessionDetailPage() {
 
   const handleDrop = async (e, dropIndex) => {
     e.preventDefault();
-
     if (draggedActivity === null || draggedActivity === dropIndex) {
       setDraggedActivity(null);
       return;
     }
-
-    // Reorder activities array
     const newActivities = [...activities];
     const [movedActivity] = newActivities.splice(draggedActivity, 1);
     newActivities.splice(dropIndex, 0, movedActivity);
-
-    // Update local state immediately for better UX
     setActivities(newActivities);
     setDraggedActivity(null);
 
-    // Update order in backend
     try {
       const updates = newActivities.map((activity, index) => ({
         id: activity._id,
         orderInSession: index + 1
       }));
-
-      // Update each activity's order
       for (const update of updates) {
         await activityAPI.update(update.id, { orderInSession: update.orderInSession });
       }
-      showSuccess('Activity order updated successfully!');
     } catch (error) {
-      console.error('Failed to update activity order:', error);
-      showError('Failed to update activity order', 'Please refresh the page.');
-      fetchSessionDetails(); // Refresh to get correct order
+      showError('Failed to update order', 'Please refresh.');
+      fetchSessionDetails();
     }
-  };
-
-  const handleDragEnd = () => {
-    setDraggedActivity(null);
   };
 
   const handleToggleStatus = async () => {
@@ -291,15 +257,14 @@ function LabSessionDetailPage() {
     try {
       if (session.isActive) {
         await labSessionAPI.deactivate(sessionId);
-        showSuccess('Session deactivated successfully!');
+        showSuccess('Session deactivated!');
       } else {
         await labSessionAPI.activate(sessionId);
-        showSuccess('Session activated successfully!');
+        showSuccess('Session activated!');
       }
       fetchSessionDetails();
     } catch (error) {
-      console.error('Failed to toggle session status:', error);
-      showError('Failed to update session status', 'Please try again.');
+      showError('Failed to update status', 'Please try again.');
     } finally {
       setTogglingStatus(false);
     }
@@ -307,552 +272,360 @@ function LabSessionDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#1e1e2e] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#89b4fa]"></div>
-      </div>
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#89b4fa]"></div>
+        </div>
+      </Layout>
     );
   }
 
   if (!session) {
     return (
-      <div className="min-h-screen bg-[#1e1e2e] flex items-center justify-center">
-        <p className="text-[#f38ba8]">Session not found</p>
-      </div>
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <p className="text-[#f38ba8]">Session not found</p>
+        </div>
+      </Layout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#1e1e2e]">
-      {/* Header with Session Info */}
-      <header className="bg-[#313244] border-b border-[#45475a] px-6 py-6">
-        <div className="max-w-7xl mx-auto">
-          {/* Title and Back Button */}
-          <div className="flex items-start justify-between mb-4">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => navigate('/instructor/dashboard')}
-                className="p-2 hover:bg-[#45475a] rounded-lg transition"
-              >
-                <ArrowLeft className="w-5 h-5 text-[#bac2de]" />
-              </button>
-              <div>
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] bg-clip-text text-transparent">
-                  {session.title}
-                </h1>
-                <p className="text-sm text-[#bac2de] mt-1">{session.description}</p>
+    <Layout>
+      <div className="space-y-5">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-4 min-w-0 flex-1">
+            <button
+              onClick={() => navigate('/instructor/lab-sessions')}
+              className="p-2 hover:bg-[#313244] rounded-lg transition flex-shrink-0 mt-1"
+              title="Back to Lab Sessions"
+            >
+              <ArrowLeft className="w-5 h-5 text-[#cdd6f4]" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-3 mb-1 flex-wrap">
+                <h1 className="text-2xl font-bold text-[#cdd6f4] truncate">{session.title}</h1>
+                <span className={`text-sm px-2.5 py-1 rounded-lg font-medium flex-shrink-0 ${
+                  session.isActive ? 'bg-[#a6e3a1]/20 text-[#a6e3a1]' : 'bg-[#f38ba8]/20 text-[#f38ba8]'
+                }`}>
+                  {session.isActive ? 'Active' : 'Inactive'}
+                </span>
+                {session.language && (
+                  <span className="text-sm px-2.5 py-1 rounded-lg font-medium flex-shrink-0 bg-[#94e2d5]/20 text-[#94e2d5] uppercase">
+                    {session.language === 'cpp' ? 'C++' : session.language}
+                  </span>
+                )}
               </div>
+              <div className="flex items-center gap-4 text-sm text-[#a6adc8] flex-wrap">
+                <span className="flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4" /> {session.course} {session.yearLevel}-{session.section}
+                </span>
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3 h-3" /> {new Date(session.scheduledDate).toLocaleDateString()}
+              </span>
+              <span className="flex items-center gap-1">
+                <Clock className="w-3 h-3" /> {session.startTime} - {session.endTime}
+              </span>
+              {session.room && (
+                <span className="flex items-center gap-1">
+                  <MapPin className="w-3 h-3" /> {session.room}
+                </span>
+              )}
             </div>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-              session.isActive
-                ? 'bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1]'
-                : 'bg-[#f38ba8] bg-opacity-20 text-[#f38ba8]'
-            }`}>
-              {session.isActive ? '🔵 Active' : '⚫ Inactive'}
-            </span>
-          </div>
-
-          {/* Session Details Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            {/* Course/Year/Section */}
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-[#45475a] rounded">
-                <BookOpen className="w-4 h-4 text-[#cba6f7]" />
-              </div>
-              <div>
-                <p className="text-[#6c7086] text-xs">Target Audience</p>
-                <p className="text-[#cdd6f4] font-medium">{session.course} {session.yearLevel}-{session.section}</p>
-              </div>
-            </div>
-
-            {/* Scheduled Date */}
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-[#45475a] rounded">
-                <Calendar className="w-4 h-4 text-[#89b4fa]" />
-              </div>
-              <div>
-                <p className="text-[#6c7086] text-xs">Scheduled</p>
-                <p className="text-[#cdd6f4] font-medium">{new Date(session.scheduledDate).toLocaleDateString()}</p>
-              </div>
-            </div>
-
-            {/* Time */}
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-[#45475a] rounded">
-                <Clock className="w-4 h-4 text-[#a6e3a1]" />
-              </div>
-              <div>
-                <p className="text-[#6c7086] text-xs">Time</p>
-                <p className="text-[#cdd6f4] font-medium">{session.startTime} - {session.endTime}</p>
-              </div>
-            </div>
-
-            {/* Room (if available) */}
-            {session.room && (
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-[#45475a] rounded">
-                  <MapPin className="w-4 h-4 text-[#f38ba8]" />
-                </div>
-                <div>
-                  <p className="text-[#6c7086] text-xs">Location</p>
-                  <p className="text-[#cdd6f4] font-medium">{session.room}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Instructor (if available) */}
-            {session.instructor && (
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-[#45475a] rounded">
-                  <User className="w-4 h-4 text-[#f9e2af]" />
-                </div>
-                <div>
-                  <p className="text-[#6c7086] text-xs">Instructor</p>
-                  <p className="text-[#cdd6f4] font-medium">
-                    {typeof session.instructor === 'object'
-                      ? `Prof. ${session.instructor.firstName} ${session.instructor.lastName}`
-                      : 'Unknown'}
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
         </div>
-      </header>
-
-      {/* Tabs */}
-      <div className="bg-[#313244] border-b border-[#45475a] px-6">
-        <div className="max-w-7xl mx-auto flex gap-4">
-          <button
-            onClick={() => setActiveTab('activities')}
-            className={`px-4 py-3 border-b-2 font-medium transition ${
-              activeTab === 'activities'
-                ? 'border-[#89b4fa] text-[#89b4fa]'
-                : 'border-transparent text-[#bac2de] hover:text-[#cdd6f4]'
-            }`}
-          >
-            <BookOpen className="w-4 h-4 inline mr-2" />
-            Activities ({activities.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('students')}
-            className={`px-4 py-3 border-b-2 font-medium transition ${
-              activeTab === 'students'
-                ? 'border-[#89b4fa] text-[#89b4fa]'
-                : 'border-transparent text-[#bac2de] hover:text-[#cdd6f4]'
-            }`}
-          >
-            <Users className="w-4 h-4 inline mr-2" />
-            Students ({allowedStudents.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('progress')}
-            className={`px-4 py-3 border-b-2 font-medium transition ${
-              activeTab === 'progress'
-                ? 'border-[#89b4fa] text-[#89b4fa]'
-                : 'border-transparent text-[#bac2de] hover:text-[#cdd6f4]'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4 inline mr-2" />
-            Progress
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`px-4 py-3 border-b-2 font-medium transition ${
-              activeTab === 'settings'
-                ? 'border-[#89b4fa] text-[#89b4fa]'
-                : 'border-transparent text-[#bac2de] hover:text-[#cdd6f4]'
-            }`}
-          >
-            <Settings className="w-4 h-4 inline mr-2" />
-            Settings
-          </button>
-        </div>
+        <button
+          onClick={() => navigate(`/instructor/lab-sessions/${sessionId}/edit`)}
+          className="px-4 py-2 text-sm bg-[#313244] hover:bg-[#45475a] text-[#cdd6f4] rounded-lg flex items-center gap-2 flex-shrink-0"
+        >
+          <Edit3 className="w-4 h-4" /> Edit Session
+        </button>
       </div>
 
-      {/* Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Activities Tab */}
-        {activeTab === 'activities' && (
-          <div>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-[#cdd6f4]">Lab Activities</h2>
-              <button
-                onClick={() => setShowActivityForm(!showActivityForm)}
-                className="flex items-center gap-2 px-4 py-2 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] font-medium rounded-lg transition"
-              >
-                <Plus className="w-4 h-4" />
-                New Activity
-              </button>
-            </div>
+        {/* Compact Tabs */}
+        <div className="flex gap-1 border-b border-[#313244]">
+          <TabButton active={activeTab === 'activities'} onClick={() => setActiveTab('activities')}>
+            <BookOpen className="w-3.5 h-3.5" /> Activities ({activities.length})
+          </TabButton>
+          <TabButton active={activeTab === 'students'} onClick={() => setActiveTab('students')}>
+            <Users className="w-3.5 h-3.5" /> Students ({allowedStudents.length})
+          </TabButton>
+          <TabButton active={activeTab === 'progress'} onClick={() => setActiveTab('progress')}>
+            <BarChart3 className="w-3.5 h-3.5" /> Progress
+          </TabButton>
+          <TabButton active={activeTab === 'monitoring'} onClick={() => setActiveTab('monitoring')}>
+            <Eye className="w-3.5 h-3.5" /> Monitoring
+          </TabButton>
+          <TabButton active={activeTab === 'settings'} onClick={() => setActiveTab('settings')}>
+            <Settings className="w-3.5 h-3.5" /> Settings
+          </TabButton>
+        </div>
 
-            {/* Create/Edit Activity Modal */}
-            <CreateActivityModal
-              isOpen={showActivityForm}
-              onClose={handleCloseActivityModal}
-              onSubmit={handleCreateActivity}
-              loading={creatingActivity}
-              initialData={editingActivity}
-              mode={activityModalMode}
-            />
-
-            {/* Activities List */}
-            {activities.length === 0 ? (
-              <div className="bg-[#313244] border border-[#45475a] rounded-lg p-8 text-center">
-                <BookOpen className="w-12 h-12 text-[#6c7086] mx-auto mb-4" />
-                <p className="text-[#bac2de] mb-4">No activities in this session yet</p>
+        {/* Tab Content */}
+        <div className="min-h-[400px]">
+          {/* Activities Tab */}
+          {activeTab === 'activities' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-[#6c7086]">Drag to reorder activities</p>
                 <button
                   onClick={() => setShowActivityForm(true)}
-                  className="px-4 py-2 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] font-medium rounded-lg transition"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] text-sm font-medium rounded-lg"
                 >
-                  Create the first activity
+                  <Plus className="w-4 h-4" /> New Activity
                 </button>
               </div>
-            ) : (
-              <div className="space-y-3">
-                {activities.map((activity, index) => (
-                  <div
-                    key={activity._id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, index)}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, index)}
-                    onDragEnd={handleDragEnd}
-                    className={`bg-[#313244] border border-[#45475a] rounded-lg p-4 hover:border-[#585b70] transition flex items-start justify-between group cursor-move ${
-                      draggedActivity === index ? 'opacity-50' : ''
-                    }`}
-                  >
-                    <div className="flex items-start gap-4 flex-1">
-                      <div className="p-2 bg-[#45475a] rounded text-[#bac2de] text-sm font-medium mt-1 opacity-0 group-hover:opacity-100 transition cursor-grab active:cursor-grabbing">
-                        <GripVertical className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-bold text-[#6c7086] bg-[#45475a] px-2 py-1 rounded">
-                            {index + 1}
-                          </span>
-                          <h3 className="text-lg font-bold text-[#cdd6f4]">
-                            {activity.title}
-                          </h3>
-                        </div>
-                        <p className="text-sm text-[#bac2de] mb-2">
-                          {activity.description}
-                        </p>
-                        <div className="flex items-center gap-2 flex-wrap text-xs text-[#bac2de]">
-                          {activity.topic && (
-                            <span className="px-2 py-1 bg-[#45475a] rounded">
-                              {activity.topic}
-                            </span>
-                          )}
-                          <span className={`px-2 py-1 rounded ${
-                            activity.difficulty === 'easy'
-                              ? 'bg-[#a6e3a1] bg-opacity-20 text-[#a6e3a1]'
-                              : activity.difficulty === 'medium'
-                              ? 'bg-[#f9e2af] bg-opacity-20 text-[#f9e2af]'
-                              : 'bg-[#f38ba8] bg-opacity-20 text-[#f38ba8]'
-                          }`}>
-                            {activity.difficulty}
-                          </span>
-                          <span className={`px-2 py-1 rounded ${
-                            activity.type === 'practice'
-                              ? 'bg-[#89b4fa] bg-opacity-20 text-[#89b4fa]'
-                              : 'bg-[#cba6f7] bg-opacity-20 text-[#cba6f7]'
-                          }`}>
-                            {activity.type}
-                          </span>
-                          {/* Language badge */}
-                          <span className="px-2 py-1 rounded bg-[#94e2d5] bg-opacity-20 text-[#94e2d5] uppercase font-medium">
-                            {activity.language}
-                          </span>
-                          {/* Time limit badge */}
-                          {activity.timeLimit && (
-                            <span className="px-2 py-1 rounded bg-[#6c7086] bg-opacity-20 text-[#bac2de] flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {activity.timeLimit} min
-                            </span>
-                          )}
-                          {/* Test cases count */}
-                          {activity.testCases && activity.testCases.length > 0 && (
-                            <span className="px-2 py-1 rounded bg-[#f9e2af] bg-opacity-20 text-[#f9e2af]">
-                              {activity.testCases.length} test{activity.testCases.length !== 1 ? 's' : ''}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditActivity(activity);
-                        }}
-                        className="p-2 hover:bg-[#45475a] text-[#89b4fa] rounded-lg transition"
-                        title="Edit activity"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDuplicateActivity(activity);
-                        }}
-                        className="p-2 hover:bg-[#45475a] text-[#a6e3a1] rounded-lg transition"
-                        title="Duplicate activity"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPlagiarismActivity(activity);
-                        }}
-                        className="p-2 hover:bg-[#45475a] text-[#cba6f7] rounded-lg transition"
-                        title="Check plagiarism"
-                      >
-                        <Shield className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteActivity(activity._id);
-                        }}
-                        className="p-2 hover:bg-[#45475a] text-[#f38ba8] rounded-lg transition"
-                        title="Delete activity"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Plagiarism Report Modal */}
-        {plagiarismActivity && (
-          <PlagiarismReport
-            activityId={plagiarismActivity._id}
-            activityTitle={plagiarismActivity.title}
-            onClose={() => setPlagiarismActivity(null)}
-          />
-        )}
+              <CreateActivityModal
+                isOpen={showActivityForm}
+                onClose={handleCloseActivityModal}
+                onSubmit={handleCreateActivity}
+                loading={creatingActivity}
+                initialData={editingActivity}
+                mode={activityModalMode}
+                sessionLanguage={session?.language}
+              />
 
-        {/* Students Tab */}
-        {activeTab === 'students' && (
-          <div>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-[#cdd6f4]">Enrolled Students</h2>
-              <button
-                onClick={() => setShowAddStudents(!showAddStudents)}
-                className="flex items-center gap-2 px-4 py-2 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] font-medium rounded-lg transition"
-              >
-                <Plus className="w-4 h-4" />
-                Add Students
-              </button>
-            </div>
-
-            {/* Student Selector Component */}
-            {showAddStudents && (
-              <div className="mb-6">
-                <StudentSelector
-                  onStudentsSelected={handleAddStudents}
-                  excludeStudentIds={allowedStudents.map(s => s._id)}
-                  maxHeight="600px"
-                  sessionInfo={{
-                    course: session.course,
-                    yearLevel: session.yearLevel,
-                    section: session.section
-                  }}
-                />
-                <button
-                  onClick={() => setShowAddStudents(false)}
-                  className="mt-4 w-full px-4 py-2 bg-[#45475a] hover:bg-[#585b70] text-[#cdd6f4] font-medium rounded-lg transition"
-                >
-                  Done
-                </button>
-              </div>
-            )}
-
-            {/* Enrolled Students List */}
-            {allowedStudents.length === 0 ? (
-              <div className="bg-[#313244] border border-[#45475a] rounded-lg p-8 text-center">
-                <Users className="w-12 h-12 text-[#6c7086] mx-auto mb-4" />
-                <p className="text-[#bac2de] mb-4">No students enrolled in this session yet</p>
-                <button
-                  onClick={() => setShowAddStudents(true)}
-                  className="px-4 py-2 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] font-medium rounded-lg transition"
-                >
-                  Add the first student
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {allowedStudents.map((student) => (
-                  <div
-                    key={student._id}
-                    className="bg-[#313244] border border-[#45475a] rounded-lg p-4 flex items-center justify-between hover:border-[#585b70] transition group"
-                  >
-                    <div className="flex-1">
-                      <p className="text-[#cdd6f4] font-medium">
-                        {student.firstName} {student.lastName}
-                      </p>
-                      <p className="text-sm text-[#bac2de]">
-                        {student.studentId}
-                        {student.course && ` • ${student.course}`}
-                        {student.yearLevel && ` • Year ${student.yearLevel}`}
-                        {student.section && ` • ${student.section}`}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleRemoveStudent(student._id)}
-                      className="p-2 hover:bg-[#45475a] text-[#f38ba8] rounded-lg transition opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Progress Tab */}
-        {activeTab === 'progress' && (
-          <StudentProgressPanel sessionId={sessionId} />
-        )}
-
-        {/* Settings Tab */}
-        {activeTab === 'settings' && (
-          <div>
-            <div className="bg-[#313244] border border-[#45475a] rounded-lg p-6">
-              <h2 className="text-xl font-bold text-[#cdd6f4] mb-6">Session Settings</h2>
-
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-[#cdd6f4] font-medium mb-3">
-                    Session Status
-                  </label>
-                  <div className="flex items-center justify-between p-4 bg-[#1e1e2e] rounded-lg border border-[#45475a]">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-3 h-3 rounded-full ${
-                        session.isActive ? 'bg-[#a6e3a1]' : 'bg-[#f38ba8]'
-                      }`}></div>
-                      <div>
-                        <p className="text-[#cdd6f4] font-medium">
-                          {session.isActive ? 'Active' : 'Inactive'}
-                        </p>
-                        <p className="text-sm text-[#bac2de]">
-                          {session.isActive
-                            ? 'Students can access this session'
-                            : 'Students cannot access this session'}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={handleToggleStatus}
-                      disabled={togglingStatus}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                        session.isActive
-                          ? 'bg-[#f38ba8] hover:bg-[#f38ba8]/80 text-[#1e1e2e]'
-                          : 'bg-[#a6e3a1] hover:bg-[#a6e3a1]/80 text-[#1e1e2e]'
+              {activities.length === 0 ? (
+                <div className="bg-[#181825] border border-[#313244] rounded-lg p-8 text-center">
+                  <BookOpen className="w-8 h-8 text-[#45475a] mx-auto mb-2" />
+                  <p className="text-sm text-[#6c7086]">No activities yet</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {activities.map((activity, index) => (
+                    <div
+                      key={activity._id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, index)}
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, index)}
+                      onDragEnd={() => setDraggedActivity(null)}
+                      className={`bg-[#181825] border border-[#313244] rounded-lg p-3 hover:border-[#45475a] transition flex items-center gap-3 group cursor-move ${
+                        draggedActivity === index ? 'opacity-50' : ''
                       }`}
                     >
-                      {togglingStatus ? (
-                        <>
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#1e1e2e]"></div>
-                          {session.isActive ? 'Deactivating...' : 'Activating...'}
-                        </>
-                      ) : (
-                        <>
-                          {session.isActive ? (
-                            <>
-                              <PowerOff className="w-4 h-4" />
-                              Deactivate
-                            </>
-                          ) : (
-                            <>
-                              <Power className="w-4 h-4" />
-                              Activate
-                            </>
+                      <div className="p-1 text-[#45475a] opacity-0 group-hover:opacity-100 transition cursor-grab">
+                        <GripVertical className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-bold text-[#6c7086] bg-[#313244] px-2 py-1 rounded">
+                        {index + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-medium text-[#cdd6f4] truncate">{activity.title}</h3>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {activity.topic && (
+                            <span className="text-xs px-1.5 py-0.5 bg-[#313244] text-[#6c7086] rounded">{activity.topic}</span>
                           )}
-                        </>
-                      )}
-                    </button>
-                  </div>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            activity.difficulty === 'easy' ? 'bg-[#a6e3a1]/20 text-[#a6e3a1]' :
+                            activity.difficulty === 'medium' ? 'bg-[#f9e2af]/20 text-[#f9e2af]' :
+                            'bg-[#f38ba8]/20 text-[#f38ba8]'
+                          }`}>{activity.difficulty}</span>
+                          <span className="text-xs px-1.5 py-0.5 bg-[#94e2d5]/20 text-[#94e2d5] rounded uppercase">{activity.language}</span>
+                          {activity.testCases?.length > 0 && (
+                            <span className="text-xs text-[#6c7086]">{activity.testCases.length} tests</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                        <button onClick={() => handleEditActivity(activity)} className="p-1.5 hover:bg-[#313244] text-[#89b4fa] rounded" title="Edit">
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleDuplicateActivity(activity)} className="p-1.5 hover:bg-[#313244] text-[#a6e3a1] rounded" title="Duplicate">
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setPlagiarismActivity(activity)} className="p-1.5 hover:bg-[#313244] text-[#cba6f7] rounded" title="Plagiarism">
+                          <Shield className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleDeleteActivity(activity._id)} className="p-1.5 hover:bg-[#313244] text-[#f38ba8] rounded" title="Delete">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
+              )}
+            </div>
+          )}
 
-                <div className="border-t border-[#45475a] pt-4">
-                  <h3 className="text-[#cdd6f4] font-medium mb-3">Session Information</h3>
-                  <div className="space-y-2 text-sm text-[#bac2de]">
-                    <p>
-                      <span className="text-[#6c7086]">Created on:</span>{' '}
-                      {new Date(session.createdAt).toLocaleDateString()}
-                    </p>
-                    <p>
-                      <span className="text-[#6c7086]">Scheduled for:</span>{' '}
-                      {new Date(session.scheduledDate).toLocaleDateString()}
-                    </p>
-                    <p>
-                      <span className="text-[#6c7086]">Time:</span>{' '}
-                      {session.startTime} - {session.endTime}
-                    </p>
-                    {session.room && (
-                      <p>
-                        <span className="text-[#6c7086]">Room:</span>{' '}
-                        {session.room}
-                      </p>
-                    )}
-                  </div>
-                </div>
+          {plagiarismActivity && (
+            <PlagiarismReport
+              activityId={plagiarismActivity._id}
+              activityTitle={plagiarismActivity.title}
+              onClose={() => setPlagiarismActivity(null)}
+            />
+          )}
 
-                {/* Edit Session */}
-                <div className="border-t border-[#45475a] pt-4">
-                  <h3 className="text-[#cdd6f4] font-medium mb-3">Edit Session</h3>
-                  <p className="text-sm text-[#bac2de] mb-4">
-                    Modify session details like title, description, schedule, and target audience.
-                  </p>
+          {/* Students Tab */}
+          {activeTab === 'students' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-[#6c7086]">{allowedStudents.length} enrolled students</p>
+                <button
+                  onClick={() => setShowAddStudents(!showAddStudents)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] text-sm font-medium rounded-lg"
+                >
+                  <Plus className="w-4 h-4" /> Add Students
+                </button>
+              </div>
+
+              {showAddStudents && (
+                <div className="bg-[#181825] border border-[#313244] rounded-lg p-4">
+                  <StudentSelector
+                    onStudentsSelected={handleAddStudents}
+                    excludeStudentIds={allowedStudents.map(s => s._id)}
+                    maxHeight="400px"
+                    sessionInfo={{ course: session.course, yearLevel: session.yearLevel, section: session.section }}
+                  />
                   <button
-                    onClick={() => navigate(`/instructor/lab-sessions/${sessionId}/edit`)}
-                    className="flex items-center gap-2 px-4 py-2 bg-[#89b4fa] hover:bg-[#7ba3e8] text-[#1e1e2e] rounded-lg font-medium transition"
+                    onClick={() => setShowAddStudents(false)}
+                    className="mt-3 w-full px-3 py-2 bg-[#313244] hover:bg-[#45475a] text-[#cdd6f4] text-sm rounded-lg"
                   >
-                    <Edit3 className="w-4 h-4" />
-                    Edit Session Details
+                    Done
                   </button>
                 </div>
+              )}
 
-                {/* Danger Zone */}
-                <div className="border-t border-[#f38ba8] border-opacity-30 pt-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <AlertTriangle className="w-4 h-4 text-[#f38ba8]" />
-                    <h3 className="text-[#f38ba8] font-medium">Danger Zone</h3>
+              {allowedStudents.length === 0 ? (
+                <div className="bg-[#181825] border border-[#313244] rounded-lg p-8 text-center">
+                  <Users className="w-8 h-8 text-[#45475a] mx-auto mb-2" />
+                  <p className="text-sm text-[#6c7086]">No students enrolled</p>
+                </div>
+              ) : (
+                <div className="bg-[#181825] border border-[#313244] rounded-lg divide-y divide-[#313244] max-h-[400px] overflow-y-auto">
+                  {[...allowedStudents]
+                    .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''))
+                    .map((student) => {
+                      const middleInitial = student.middleName ? ` ${student.middleName.charAt(0)}.` : '';
+                      return (
+                        <div key={student._id} className="px-4 py-3 flex items-center justify-between group hover:bg-[#313244]/50">
+                          <div>
+                            <p className="text-base text-[#cdd6f4]">{student.lastName}, {student.firstName}{middleInitial}</p>
+                            <p className="text-sm text-[#6c7086]">{student.studentId}</p>
+                          </div>
+                          <button
+                            onClick={() => handleRemoveStudent(student._id)}
+                            className="p-1.5 hover:bg-[#313244] text-[#f38ba8] rounded opacity-0 group-hover:opacity-100 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Progress Tab */}
+          {activeTab === 'progress' && <StudentProgressPanel sessionId={sessionId} />}
+
+          {/* Monitoring Tab */}
+          {activeTab === 'monitoring' && <SessionMonitoringPanel sessionId={sessionId} />}
+
+          {/* Settings Tab */}
+          {activeTab === 'settings' && (
+            <div className="space-y-4">
+              {/* Status Toggle */}
+              <div className="bg-[#181825] border border-[#313244] rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded-full ${session.isActive ? 'bg-[#a6e3a1]' : 'bg-[#f38ba8]'}`} />
+                    <div>
+                      <p className="text-sm font-medium text-[#cdd6f4]">{session.isActive ? 'Active' : 'Inactive'}</p>
+                      <p className="text-xs text-[#6c7086]">
+                        {session.isActive ? 'Students can access this session' : 'Students cannot access'}
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-sm text-[#bac2de] mb-4">
-                    Permanently delete this lab session and all its activities. This action cannot be undone.
-                  </p>
                   <button
-                    onClick={handleDeleteSession}
-                    disabled={deletingSession}
-                    className="flex items-center gap-2 px-4 py-2 bg-[#f38ba8] hover:bg-[#f38ba8]/80 text-[#1e1e2e] rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleToggleStatus}
+                    disabled={togglingStatus}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50 ${
+                      session.isActive
+                        ? 'bg-[#f38ba8] hover:bg-[#f38ba8]/80 text-[#1e1e2e]'
+                        : 'bg-[#a6e3a1] hover:bg-[#a6e3a1]/80 text-[#1e1e2e]'
+                    }`}
                   >
-                    {deletingSession ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#1e1e2e]"></div>
-                        Deleting...
-                      </>
+                    {togglingStatus ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#1e1e2e]" />
+                    ) : session.isActive ? (
+                      <><PowerOff className="w-4 h-4" /> Deactivate</>
                     ) : (
-                      <>
-                        <Trash2 className="w-4 h-4" />
-                        Delete Session
-                      </>
+                      <><Power className="w-4 h-4" /> Activate</>
                     )}
                   </button>
                 </div>
               </div>
+
+              {/* Session Info */}
+              <div className="bg-[#181825] border border-[#313244] rounded-lg p-4">
+                <h3 className="text-sm font-medium text-[#cdd6f4] mb-3">Session Information</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-[#6c7086]">Created</p>
+                    <p className="text-[#cdd6f4]">{new Date(session.createdAt).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#6c7086]">Scheduled</p>
+                    <p className="text-[#cdd6f4]">{new Date(session.scheduledDate).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#6c7086]">Time</p>
+                    <p className="text-[#cdd6f4]">{session.startTime} - {session.endTime}</p>
+                  </div>
+                  {session.room && (
+                    <div>
+                      <p className="text-xs text-[#6c7086]">Room</p>
+                      <p className="text-[#cdd6f4]">{session.room}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Danger Zone */}
+              <div className="bg-[#181825] border border-[#f38ba8]/30 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="w-4 h-4 text-[#f38ba8]" />
+                  <h3 className="text-sm font-medium text-[#f38ba8]">Danger Zone</h3>
+                </div>
+                <p className="text-xs text-[#6c7086] mb-3">
+                  Permanently delete this session and all activities. This cannot be undone.
+                </p>
+                <button
+                  onClick={handleDeleteSession}
+                  disabled={deletingSession}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f38ba8] hover:bg-[#f38ba8]/80 text-[#1e1e2e] rounded-lg text-sm font-medium disabled:opacity-50"
+                >
+                  {deletingSession ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#1e1e2e]" />
+                  ) : (
+                    <><Trash2 className="w-4 h-4" /> Delete Session</>
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-      </main>
-    </div>
+          )}
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+function TabButton({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-2 text-xs font-medium transition flex items-center gap-1.5 border-b-2 -mb-[1px] ${
+        active
+          ? 'border-[#89b4fa] text-[#89b4fa]'
+          : 'border-transparent text-[#6c7086] hover:text-[#cdd6f4]'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

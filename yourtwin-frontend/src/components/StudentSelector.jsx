@@ -296,35 +296,40 @@ function StudentSelector({
             </div>
           ) : (
             <div className="divide-y divide-[#45475a]">
-              {filteredStudents.map(student => (
-                <label
-                  key={student._id}
-                  className="flex items-center gap-3 p-3 hover:bg-[#313244] cursor-pointer transition border-l-2 border-transparent hover:border-[#89b4fa]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedStudents.includes(student._id)}
-                    onChange={() => toggleStudent(student._id)}
-                    className="w-4 h-4 cursor-pointer"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <p className="text-[#cdd6f4] font-medium text-sm">
-                        {student.firstName} {student.lastName}
-                      </p>
-                      {/* Course/Year/Section badge */}
-                      {student.course && (
-                        <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-[#cba6f7] bg-opacity-20 text-[#cba6f7]">
-                          {student.course} {student.yearLevel}-{student.section}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[#6c7086] text-xs">
-                      {student.studentId}
-                    </p>
-                  </div>
-                </label>
-              ))}
+              {[...filteredStudents]
+                .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''))
+                .map(student => {
+                  const middleInitial = student.middleName ? ` ${student.middleName.charAt(0)}.` : '';
+                  return (
+                    <label
+                      key={student._id}
+                      className="flex items-center gap-3 p-3 hover:bg-[#313244] cursor-pointer transition border-l-2 border-transparent hover:border-[#89b4fa]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedStudents.includes(student._id)}
+                        onChange={() => toggleStudent(student._id)}
+                        className="w-4 h-4 cursor-pointer"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-[#cdd6f4] font-medium text-sm">
+                            {student.lastName}, {student.firstName}{middleInitial}
+                          </p>
+                          {/* Course/Year/Section badge */}
+                          {student.course && (
+                            <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-[#cba6f7] bg-opacity-20 text-[#cba6f7]">
+                              {student.course} {student.yearLevel}-{student.section}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[#6c7086] text-xs">
+                          {student.studentId}
+                        </p>
+                      </div>
+                    </label>
+                  );
+                })}
             </div>
           )}
         </div>
@@ -358,29 +363,34 @@ function StudentSelector({
               </p>
             ) : (
               <div className="space-y-2">
-                {getSelectedStudentDetails().map(student => (
-                  <div
-                    key={student._id}
-                    className="flex items-center justify-between bg-[#313244] rounded p-2 text-sm"
-                  >
-                    <div className="flex-1 min-w-0 mr-2">
-                      <span className="text-[#cdd6f4] truncate block">
-                        {student.firstName} {student.lastName}
-                      </span>
-                      {student.course && (
-                        <span className="text-[#6c7086] text-xs">
-                          {student.course} {student.yearLevel}-{student.section}
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => toggleStudent(student._id)}
-                      className="text-[#f38ba8] hover:text-[#f28482] transition flex-shrink-0"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                {[...getSelectedStudentDetails()]
+                  .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''))
+                  .map(student => {
+                    const middleInitial = student.middleName ? ` ${student.middleName.charAt(0)}.` : '';
+                    return (
+                      <div
+                        key={student._id}
+                        className="flex items-center justify-between bg-[#313244] rounded p-2 text-sm"
+                      >
+                        <div className="flex-1 min-w-0 mr-2">
+                          <span className="text-[#cdd6f4] truncate block">
+                            {student.lastName}, {student.firstName}{middleInitial}
+                          </span>
+                          {student.course && (
+                            <span className="text-[#6c7086] text-xs">
+                              {student.course} {student.yearLevel}-{student.section}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => toggleStudent(student._id)}
+                          className="text-[#f38ba8] hover:text-[#f28482] transition flex-shrink-0"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
               </div>
             )}
           </div>

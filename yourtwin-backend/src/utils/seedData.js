@@ -9,6 +9,7 @@ import SessionEnrollment from '../models/SessionEnrollment.js';
 import TestCase from '../models/TestCase.js';
 import TestResult from '../models/TestResult.js';
 import StudentCompetency from '../models/StudentCompetency.js';
+import ActivityMonitoring from '../models/ActivityMonitoring.js';
 import connectDB from '../config/database.js';
 import dotenv from 'dotenv';
 
@@ -32,7 +33,8 @@ const seedData = async () => {
       SessionEnrollment.deleteMany({}),
       TestCase.deleteMany({}),
       TestResult.deleteMany({}),
-      StudentCompetency.deleteMany({})
+      StudentCompetency.deleteMany({}),
+      ActivityMonitoring.deleteMany({})
     ]);
 
     console.log('✅ Cleared all existing data');
@@ -278,7 +280,9 @@ const seedData = async () => {
     console.log(`✅ ${competencyRecords.length} student competency records created`);
 
     // =====================
-    // CREATE LAB SESSIONS (With Denormalized course/yearLevel/section)
+    // CREATE LAB SESSIONS
+    // Now uses 'sections' array instead of single 'section'
+    // Uses 'isActive' and 'isCompleted' instead of 'status'
     // =====================
     const today = new Date();
     const nextWeek = new Date(today);
@@ -288,65 +292,66 @@ const seedData = async () => {
     const lastWeek = new Date(today);
     lastWeek.setDate(today.getDate() - 7);
 
-    // Note: LabSession no longer has allowedStudents - we use SessionEnrollment
+    // Note: LabSession uses sections[] array for multiple sections
     const labSession1 = await LabSession.create({
       title: 'Week 7: Arrays and Loops Fundamentals',
       description: 'Comprehensive introduction to array manipulation, iteration, and loop structures in C++',
       course: 'BSIT',
       yearLevel: 3,
-      section: 'B',
+      sections: ['B'],
+      language: 'cpp',
       instructor: instructorUsers[0]._id,
       scheduledDate: lastWeek,
       startTime: '09:00',
       endTime: '11:00',
-      room: 'CS Lab 1',
       isActive: true,
-      status: 'ongoing'
+      isCompleted: false
     });
 
     const labSession2 = await LabSession.create({
       title: 'Week 8: Functions and Recursion',
-      description: 'Deep dive into function declarations, parameters, return values, and recursive algorithms',
+      description: 'Deep dive into function declarations, parameters, return values, and recursive algorithms in C++',
       course: 'BSIT',
       yearLevel: 3,
-      section: 'B',
+      sections: ['B'],
+      language: 'cpp',
       instructor: instructorUsers[0]._id,
       scheduledDate: today,
       startTime: '10:00',
       endTime: '12:00',
-      room: 'CS Lab 1',
-      isActive: false,
-      status: 'scheduled'
+      isActive: true,
+      isCompleted: false
     });
 
     const labSession3 = await LabSession.create({
       title: 'Week 9: Pointers and Memory Management',
-      description: 'Understanding memory allocation, pointers, and dynamic data structures',
+      description: 'Understanding memory allocation, pointers, and dynamic data structures in C++',
       course: 'BSIT',
       yearLevel: 3,
-      section: 'B',
+      sections: ['B'],
+      language: 'cpp',
       instructor: instructorUsers[0]._id,
       scheduledDate: nextWeek,
       startTime: '09:00',
       endTime: '11:00',
-      room: 'CS Lab 2',
       isActive: false,
-      status: 'scheduled'
+      isCompleted: false
     });
 
+    // Session with MULTIPLE sections (A and B)
     const labSession4 = await LabSession.create({
       title: 'Week 5: Data Structures - Stacks and Queues',
-      description: 'Implementation and application of stack and queue data structures',
+      description: 'Implementation and application of stack and queue data structures in C++',
       course: 'BSIT',
       yearLevel: 3,
-      section: 'A',
+      sections: ['A', 'B'],
+      language: 'cpp',
       instructor: instructorUsers[0]._id,
       scheduledDate: today,
       startTime: '13:00',
       endTime: '15:00',
-      room: 'CS Lab 3',
       isActive: true,
-      status: 'ongoing'
+      isCompleted: false
     });
 
     const labSession5 = await LabSession.create({
@@ -354,47 +359,48 @@ const seedData = async () => {
       description: 'Basic Python syntax, variables, data types, and control structures',
       course: 'BSCS',
       yearLevel: 2,
-      section: 'A',
+      sections: ['A'],
+      language: 'python',
       instructor: instructorUsers[1]._id,
       scheduledDate: today,
       startTime: '14:00',
       endTime: '16:00',
-      room: 'CS Lab 4',
       isActive: true,
-      status: 'ongoing'
+      isCompleted: false
     });
 
     const labSession6 = await LabSession.create({
       title: 'Week 6: Object-Oriented Programming Concepts',
-      description: 'Classes, objects, inheritance, and polymorphism in C++',
+      description: 'Classes, objects, inheritance, and polymorphism in Java',
       course: 'BSCS',
       yearLevel: 3,
-      section: 'A',
+      sections: ['A'],
+      language: 'java',
       instructor: instructorUsers[1]._id,
       scheduledDate: nextWeek,
       startTime: '10:00',
       endTime: '12:00',
-      room: 'CS Lab 1',
       isActive: false,
-      status: 'scheduled'
+      isCompleted: false
     });
 
+    // Completed session example
     const labSession7 = await LabSession.create({
       title: 'Week 10: Advanced Algorithms',
-      description: 'Sorting algorithms, searching techniques, and algorithm analysis',
+      description: 'Sorting algorithms, searching techniques, and algorithm analysis in C++',
       course: 'BSIT',
       yearLevel: 3,
-      section: 'B',
+      sections: ['A', 'B', 'C'],
+      language: 'cpp',
       instructor: instructorUsers[0]._id,
-      scheduledDate: twoWeeksLater,
+      scheduledDate: lastWeek,
       startTime: '09:00',
       endTime: '11:00',
-      room: 'CS Lab 1',
       isActive: false,
-      status: 'scheduled'
+      isCompleted: true
     });
 
-    console.log('✅ 7 lab sessions created');
+    console.log('✅ 7 lab sessions created (including multi-section and completed examples)');
 
     // =====================
     // CREATE SESSION ENROLLMENTS (Junction Table)
@@ -997,6 +1003,203 @@ const seedData = async () => {
     console.log(`✅ ${testResultRecords.length} test results created`);
 
     // =====================
+    // CREATE ACTIVITY MONITORING DATA
+    // =====================
+    const monitoringRecords = [];
+
+    // Marc (Student 0) - Clean activity, minimal flags
+    monitoringRecords.push({
+      student: studentUsers[0]._id,
+      activity: activity1._id,
+      labSession: labSession1._id,
+      submission: submission2._id,
+      tabSwitchCount: 3,
+      totalTimeAway: 45000, // 45 seconds
+      totalActiveTime: 1800000, // 30 minutes
+      pasteCount: 1,
+      largePasteCount: 0,
+      totalPastedChars: 25,
+      idleCount: 2,
+      totalIdleTime: 30000,
+      flags: [],
+      events: [
+        { type: 'focus', timestamp: new Date(Date.now() - 7200000) },
+        { type: 'code_change', timestamp: new Date(Date.now() - 7100000), lineCount: 8, charCount: 150 },
+        { type: 'blur', timestamp: new Date(Date.now() - 7000000), duration: 15000 },
+        { type: 'focus', timestamp: new Date(Date.now() - 6985000) },
+        { type: 'paste', timestamp: new Date(Date.now() - 6900000), pasteSize: 25, pasteContent: 'int arr[] = {10, 20, 30' },
+        { type: 'code_change', timestamp: new Date(Date.now() - 6800000), lineCount: 10, charCount: 200 }
+      ],
+      isActive: false
+    });
+
+    // Kurt (Student 1) - Some suspicious activity
+    monitoringRecords.push({
+      student: studentUsers[1]._id,
+      activity: activity2._id,
+      labSession: labSession1._id,
+      submission: submission7._id,
+      tabSwitchCount: 15,
+      totalTimeAway: 300000, // 5 minutes
+      totalActiveTime: 2400000, // 40 minutes
+      pasteCount: 4,
+      largePasteCount: 2,
+      totalPastedChars: 350,
+      idleCount: 5,
+      totalIdleTime: 120000,
+      flags: [
+        {
+          type: 'large_paste',
+          description: 'Pasted 180 characters at once',
+          severity: 'medium',
+          timestamp: new Date(Date.now() - 4000000)
+        }
+      ],
+      events: [
+        { type: 'focus', timestamp: new Date(Date.now() - 4800000) },
+        { type: 'code_change', timestamp: new Date(Date.now() - 4700000), lineCount: 5, charCount: 80 },
+        { type: 'blur', timestamp: new Date(Date.now() - 4600000), duration: 60000 },
+        { type: 'focus', timestamp: new Date(Date.now() - 4540000) },
+        { type: 'paste', timestamp: new Date(Date.now() - 4000000), pasteSize: 180, pasteContent: 'for(int i = 0; i < n; i++) { cin >> arr[i]; sum += arr[i]; } cout << sum;' },
+        { type: 'blur', timestamp: new Date(Date.now() - 3800000), duration: 120000 },
+        { type: 'focus', timestamp: new Date(Date.now() - 3680000) }
+      ],
+      isActive: false
+    });
+
+    // Angelo (Student 2) - Flagged for excessive tab switches
+    monitoringRecords.push({
+      student: studentUsers[2]._id,
+      activity: activity1._id,
+      labSession: labSession1._id,
+      submission: submission9._id,
+      tabSwitchCount: 28,
+      totalTimeAway: 480000, // 8 minutes
+      totalActiveTime: 1200000, // 20 minutes
+      pasteCount: 3,
+      largePasteCount: 1,
+      totalPastedChars: 120,
+      idleCount: 4,
+      totalIdleTime: 60000,
+      flags: [
+        {
+          type: 'excessive_tab_switches',
+          description: '28 tab switches detected',
+          severity: 'medium',
+          timestamp: new Date(Date.now() - 300000)
+        }
+      ],
+      events: [
+        { type: 'focus', timestamp: new Date(Date.now() - 600000) },
+        { type: 'blur', timestamp: new Date(Date.now() - 580000), duration: 10000 },
+        { type: 'focus', timestamp: new Date(Date.now() - 570000) },
+        { type: 'blur', timestamp: new Date(Date.now() - 550000), duration: 15000 },
+        { type: 'focus', timestamp: new Date(Date.now() - 535000) },
+        { type: 'paste', timestamp: new Date(Date.now() - 500000), pasteSize: 80, pasteContent: 'cout << arr[i] << " ";' },
+        { type: 'code_change', timestamp: new Date(Date.now() - 400000), lineCount: 9, charCount: 180 }
+      ],
+      isActive: false
+    });
+
+    // Maria (Student 4) - Clean activity, model student
+    monitoringRecords.push({
+      student: studentUsers[4]._id,
+      activity: activity1._id,
+      labSession: labSession1._id,
+      submission: submission10._id,
+      tabSwitchCount: 2,
+      totalTimeAway: 20000,
+      totalActiveTime: 1500000,
+      pasteCount: 0,
+      largePasteCount: 0,
+      totalPastedChars: 0,
+      idleCount: 1,
+      totalIdleTime: 15000,
+      flags: [],
+      events: [
+        { type: 'focus', timestamp: new Date(Date.now() - 9000000) },
+        { type: 'code_change', timestamp: new Date(Date.now() - 8900000), lineCount: 7, charCount: 140 },
+        { type: 'code_change', timestamp: new Date(Date.now() - 8700000), lineCount: 9, charCount: 180 },
+        { type: 'blur', timestamp: new Date(Date.now() - 8500000), duration: 20000 },
+        { type: 'focus', timestamp: new Date(Date.now() - 8480000) }
+      ],
+      isActive: false
+    });
+
+    // Juan (Student 5) - Long absence flagged
+    monitoringRecords.push({
+      student: studentUsers[5]._id,
+      activity: activity3._id,
+      labSession: labSession1._id,
+      submission: submission13._id,
+      tabSwitchCount: 8,
+      totalTimeAway: 420000, // 7 minutes
+      totalActiveTime: 1800000,
+      pasteCount: 2,
+      largePasteCount: 0,
+      totalPastedChars: 45,
+      idleCount: 3,
+      totalIdleTime: 90000,
+      flags: [
+        {
+          type: 'long_absence',
+          description: 'Left activity for 6 minutes',
+          severity: 'medium',
+          timestamp: new Date(Date.now() - 3500000)
+        }
+      ],
+      events: [
+        { type: 'focus', timestamp: new Date(Date.now() - 4000000) },
+        { type: 'code_change', timestamp: new Date(Date.now() - 3900000), lineCount: 6, charCount: 100 },
+        { type: 'blur', timestamp: new Date(Date.now() - 3800000), duration: 360000 },
+        { type: 'focus', timestamp: new Date(Date.now() - 3440000) },
+        { type: 'code_change', timestamp: new Date(Date.now() - 3400000), lineCount: 12, charCount: 220 }
+      ],
+      isActive: false
+    });
+
+    // Alexis (Student 6) - BSIT 3-A with high paste activity
+    monitoringRecords.push({
+      student: studentUsers[6]._id,
+      activity: activity8._id,
+      labSession: labSession4._id,
+      submission: submission14._id,
+      tabSwitchCount: 22,
+      totalTimeAway: 540000,
+      totalActiveTime: 2100000,
+      pasteCount: 8,
+      largePasteCount: 4,
+      totalPastedChars: 650,
+      idleCount: 6,
+      totalIdleTime: 180000,
+      flags: [
+        {
+          type: 'excessive_tab_switches',
+          description: '22 tab switches detected',
+          severity: 'medium',
+          timestamp: new Date(Date.now() - 1500000)
+        },
+        {
+          type: 'copy_paste_pattern',
+          description: '650 characters pasted',
+          severity: 'medium',
+          timestamp: new Date(Date.now() - 1200000)
+        }
+      ],
+      events: [
+        { type: 'focus', timestamp: new Date(Date.now() - 1800000) },
+        { type: 'paste', timestamp: new Date(Date.now() - 1700000), pasteSize: 150, pasteContent: 'int stack[100]; int top = -1;' },
+        { type: 'blur', timestamp: new Date(Date.now() - 1600000), duration: 45000 },
+        { type: 'focus', timestamp: new Date(Date.now() - 1555000) },
+        { type: 'paste', timestamp: new Date(Date.now() - 1500000), pasteSize: 200, pasteContent: 'void push(int x) { stack[++top] = x; }' }
+      ],
+      isActive: false
+    });
+
+    await ActivityMonitoring.insertMany(monitoringRecords);
+    console.log(`✅ ${monitoringRecords.length} activity monitoring records created`);
+
+    // =====================
     // SUMMARY OUTPUT
     // =====================
     console.log('\n🎉 Database seeded successfully with BCNF-compliant data!');
@@ -1032,7 +1235,7 @@ const seedData = async () => {
     console.log(' 11. Fiona Hernandez (fiona.hernandez@mmsu.edu.ph) - ID: 23-160101');
     console.log(' 12. Gabriel Mendoza (gabriel.mendoza@mmsu.edu.ph) - ID: 23-160102');
 
-    console.log('\n📊 BCNF SCHEMA OVERVIEW:');
+    console.log('\n📊 SCHEMA OVERVIEW:');
     console.log('═'.repeat(60));
     console.log('  ✅ Users: Base identity only (no role-specific fields)');
     console.log('  ✅ Students: Normalized with userId reference');
@@ -1040,11 +1243,13 @@ const seedData = async () => {
     console.log('  ✅ SessionEnrollments: Junction table (no allowedStudents array)');
     console.log('  ✅ TestCases: Separate from Activity');
     console.log('  ✅ TestResults: Separate from Submission (with expectedOutput snapshot)');
-    console.log('  ✅ StudentCompetencies: Separate from StudentTwin');
-    console.log('\n  📌 Conscious Denormalizations:');
-    console.log('     • labsessions.course/yearLevel/section');
-    console.log('     • submissions.labSessionId');
-    console.log('     • test_results.expectedOutput (snapshot)');
+    console.log('  ✅ StudentTwin: MIRROR TWIN - exact replica of student learning data');
+    console.log('  ✅ ShadowTwinEngine: SHADOW TWIN - cognitive opposite with 5-level hints');
+    console.log('  ✅ ActivityMonitoring: Tracks tab switches, pastes, flags for proctoring');
+    console.log('\n  📌 Recent Schema Changes:');
+    console.log('     • LabSession.sections[] - Array for multiple sections (was: section string)');
+    console.log('     • LabSession.isActive/isCompleted - Manual control (no auto-activation)');
+    console.log('     • Removed: status, manualOverride fields from LabSession');
 
     console.log('\n🧪 DATA CREATED:');
     console.log('═'.repeat(60));
@@ -1060,6 +1265,7 @@ const seedData = async () => {
     console.log(`  • ${testCases.length} test cases`);
     console.log(`  • 18 submissions`);
     console.log(`  • ${testResultRecords.length} test results`);
+    console.log(`  • ${monitoringRecords.length} activity monitoring records`);
 
     process.exit(0);
   } catch (error) {

@@ -50,20 +50,33 @@ export const generateCompletion = async (messages, options = {}) => {
   } catch (error) {
     console.error(`${selection.provider} failed:`, error.error || error.message);
 
-    // Fallback to Gemini if Ollama failed
+    // Fallback to Gemini with cascading models if Ollama failed
     if (allowFallback && selection.provider === AI_PROVIDERS.OLLAMA && geminiService.isConfigured()) {
-      console.log('↪️ Falling back to Gemini...');
+      console.log('↪️ Falling back to Gemini (cascading models)...');
       try {
-        const fallback = await geminiService.generateCompletion(messages, genOptions);
+        // Use cascading fallback: gemini-2.5-flash-lite → gemini-2.5-flash → gemini-3-flash
+        const fallback = await geminiService.generateCompletionWithFallback(messages, genOptions);
+        if (fallback.success) {
+          return {
+            ...fallback,
+            provider: AI_PROVIDERS.GEMINI,
+            providerSelection: {
+              ...selection,
+              fallback: true,
+              fallbackLevel: fallback.fallbackLevel,
+              originalError: error.error
+            }
+          };
+        }
         return {
-          ...fallback,
-          provider: AI_PROVIDERS.GEMINI,
-          providerSelection: { ...selection, fallback: true, originalError: error.error }
+          success: false,
+          error: `Ollama and all Gemini models failed: ${fallback.error}`,
+          provider: null
         };
       } catch (fallbackError) {
         return {
           success: false,
-          error: `Both providers failed: ${error.error}, ${fallbackError.error}`,
+          error: `Both providers failed: ${error.error}, ${fallbackError.message}`,
           provider: null
         };
       }
@@ -117,21 +130,40 @@ export const getProvidersStatus = async () => {
 
 // Initialize
 export const initialize = async () => {
-  console.log('🤖 Initializing AI Service...');
+  console.log('🤖 Initializing AI Service (Dual Model Architecture)...');
+  console.log('═══════════════════════════════════════════════════════');
 
   const ollamaHealth = await ollamaService.checkOllamaHealth();
   if (ollamaHealth.available) {
-    console.log(`✅ Ollama ready (${ollamaHealth.models?.length || 0} models)`);
+    console.log(`✅ Ollama ready (${ollamaHealth.models?.length || 0} models available)`);
+
+    // Show dual model configuration
+    const validationModel = process.env.OLLAMA_VALIDATION_MODEL || 'deepseek-r1:7b';
+    const shadowTwinModel = process.env.OLLAMA_SHADOW_TWIN_MODEL || 'mistral:7b-instruct-q4_0';
+
+    console.log('📦 Local Models:');
+    console.log(`   ├─ Validation/Grading: ${validationModel}`);
+    console.log(`   └─ Shadow Twin/Tutor: ${shadowTwinModel}`);
+
+    // Warmup both models
     await ollamaService.warmupModel();
   } else {
-    console.log('⚠️ Ollama not available');
+    console.log('⚠️ Ollama not available - using Gemini fallback only');
   }
 
   if (geminiService.isConfigured()) {
-    console.log('✅ Gemini configured as fallback');
+    const models = geminiService.getModelList();
+    console.log('☁️ Gemini Cascading Fallback:');
+    models.forEach((model, i) => {
+      const prefix = i === models.length - 1 ? '└─' : '├─';
+      const label = i === 0 ? '(Primary)' : i === 1 ? '(Secondary)' : '(Tertiary)';
+      console.log(`   ${prefix} ${model} ${label}`);
+    });
   } else {
-    console.log('⚠️ Gemini not configured');
+    console.log('⚠️ Gemini not configured - no fallback available');
   }
+
+  console.log('═══════════════════════════════════════════════════════\n');
 
   return getProvidersStatus();
 };

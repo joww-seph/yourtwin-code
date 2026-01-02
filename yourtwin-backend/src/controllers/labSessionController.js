@@ -375,6 +375,7 @@ export const activateLabSession = async (req, res) => {
     }
 
     labSession.isActive = true;
+    labSession.isCompleted = false;
     await labSession.save();
 
     await labSession.populate('instructor', 'firstName lastName fullName email');
@@ -465,6 +466,125 @@ export const deactivateLabSession = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to deactivate lab session',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Mark lab session as complete
+// @route   PUT /api/lab-sessions/:id/complete
+export const markSessionComplete = async (req, res) => {
+  try {
+    const labSession = await LabSession.findById(req.params.id);
+
+    if (!labSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lab session not found'
+      });
+    }
+
+    if (labSession.instructor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to complete this session'
+      });
+    }
+
+    labSession.isCompleted = true;
+    labSession.isActive = false;
+    await labSession.save();
+
+    await labSession.populate('instructor', 'firstName lastName fullName email');
+
+    const enrolledStudents = await getEnrolledStudentsWithUserInfo(labSession._id);
+    const activities = await getSessionActivities(labSession._id);
+
+    const responseData = {
+      ...labSession.toObject(),
+      allowedStudents: enrolledStudents,
+      activities
+    };
+
+    emitToLabSession(labSession._id, 'lab-session-updated', {
+      sessionId: labSession._id,
+      isCompleted: true,
+      session: responseData
+    });
+    emitToAllStudents('lab-session-completed', {
+      sessionId: labSession._id,
+      session: responseData
+    });
+
+    res.json({
+      success: true,
+      message: 'Lab session marked as complete',
+      data: responseData
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to complete lab session',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Reopen a completed lab session
+// @route   PUT /api/lab-sessions/:id/reopen
+export const reopenSession = async (req, res) => {
+  try {
+    const labSession = await LabSession.findById(req.params.id);
+
+    if (!labSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lab session not found'
+      });
+    }
+
+    if (labSession.instructor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to reopen this session'
+      });
+    }
+
+    labSession.isCompleted = false;
+    labSession.isActive = true;
+    await labSession.save();
+
+    await labSession.populate('instructor', 'firstName lastName fullName email');
+
+    const enrolledStudents = await getEnrolledStudentsWithUserInfo(labSession._id);
+    const activities = await getSessionActivities(labSession._id);
+
+    const responseData = {
+      ...labSession.toObject(),
+      allowedStudents: enrolledStudents,
+      activities
+    };
+
+    emitToLabSession(labSession._id, 'lab-session-updated', {
+      sessionId: labSession._id,
+      isCompleted: false,
+      isActive: true,
+      session: responseData
+    });
+    emitToAllStudents('lab-session-activated', {
+      sessionId: labSession._id,
+      session: responseData
+    });
+
+    res.json({
+      success: true,
+      message: 'Lab session reopened',
+      data: responseData
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reopen lab session',
       error: error.message
     });
   }
@@ -1099,6 +1219,136 @@ export const getActivityProgress = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get activity progress',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Extend lab session end time
+// @route   PUT /api/lab-sessions/:id/extend
+export const extendLabSession = async (req, res) => {
+  try {
+    const { extendedEndTime } = req.body;
+    const labSession = await LabSession.findById(req.params.id);
+
+    if (!labSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lab session not found'
+      });
+    }
+
+    if (labSession.instructor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to extend this session'
+      });
+    }
+
+    // Validate time format (HH:MM)
+    if (!extendedEndTime || !/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(extendedEndTime)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid time format. Use HH:MM format.'
+      });
+    }
+
+    labSession.extendedEndTime = extendedEndTime;
+    await labSession.save();
+
+    await labSession.populate('instructor', 'firstName lastName fullName email');
+    const enrolledStudents = await getEnrolledStudentsWithUserInfo(labSession._id);
+    const activities = await getSessionActivities(labSession._id);
+
+    const responseData = {
+      ...labSession.toObject(),
+      allowedStudents: enrolledStudents,
+      activities
+    };
+
+    // Notify students and instructors
+    emitToLabSession(labSession._id, 'lab-session-extended', {
+      sessionId: labSession._id,
+      extendedEndTime,
+      session: responseData
+    });
+    emitToAllStudents('lab-session-extended', {
+      sessionId: labSession._id,
+      extendedEndTime,
+      session: responseData
+    });
+
+    res.json({
+      success: true,
+      message: `Lab session extended until ${extendedEndTime}`,
+      data: responseData
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to extend lab session',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Allow student to resubmit (instructor action)
+// @route   PUT /api/lab-sessions/:sessionId/resubmit/:studentId/:activityId
+export const allowResubmission = async (req, res) => {
+  try {
+    const { sessionId, studentId, activityId } = req.params;
+
+    const labSession = await LabSession.findById(sessionId);
+    if (!labSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lab session not found'
+      });
+    }
+
+    if (labSession.instructor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized'
+      });
+    }
+
+    // Find the student's best submission for this activity and reset it
+    const submission = await Submission.findOne({
+      studentId,
+      activityId,
+      status: 'passed'
+    }).sort({ score: -1 });
+
+    if (!submission) {
+      return res.status(404).json({
+        success: false,
+        message: 'No passed submission found for this student'
+      });
+    }
+
+    // Mark the submission as needing resubmission
+    submission.status = 'resubmission_required';
+    submission.isBest = false;
+    await submission.save();
+
+    // Notify the student
+    const student = await Student.findById(studentId).populate('userId', 'firstName lastName');
+    emitToUsers([student.userId._id], 'resubmission-required', {
+      activityId,
+      sessionId,
+      message: 'Your instructor has requested a resubmission for this activity.'
+    });
+
+    res.json({
+      success: true,
+      message: `Resubmission required for ${student.userId.firstName} ${student.userId.lastName}`,
+      data: { submission }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to allow resubmission',
       error: error.message
     });
   }

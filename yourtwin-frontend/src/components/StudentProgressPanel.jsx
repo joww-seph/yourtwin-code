@@ -13,9 +13,11 @@ import {
   BarChart3,
   Target,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  RotateCcw
 } from 'lucide-react';
 import { labSessionAPI } from '../services/api';
+import { showSuccess, showError } from '../utils/sweetalert';
 
 // Status badge component
 function StatusBadge({ status }) {
@@ -25,6 +27,7 @@ function StatusBadge({ status }) {
     error: { color: '#fab387', bg: 'rgba(250, 179, 135, 0.15)', label: 'Error' },
     pending: { color: '#f9e2af', bg: 'rgba(249, 226, 175, 0.15)', label: 'Pending' },
     running: { color: '#89b4fa', bg: 'rgba(137, 180, 250, 0.15)', label: 'Running' },
+    resubmission_required: { color: '#fab387', bg: 'rgba(250, 179, 135, 0.15)', label: 'Resubmit' },
     not_started: { color: '#6c7086', bg: 'rgba(108, 112, 134, 0.15)', label: 'Not Started' }
   };
 
@@ -77,9 +80,24 @@ function StatCard({ icon: Icon, label, value, subValue, color = '#89b4fa' }) {
 }
 
 // Student row component (expandable)
-function StudentRow({ student, activities, onViewActivity }) {
+function StudentRow({ student, activities, sessionId, onRefresh }) {
   const [expanded, setExpanded] = useState(false);
+  const [allowingResubmission, setAllowingResubmission] = useState(null);
   const { progress } = student;
+
+  const handleAllowResubmission = async (activityId, e) => {
+    e.stopPropagation();
+    setAllowingResubmission(activityId);
+    try {
+      await labSessionAPI.allowResubmission(sessionId, student.student._id, activityId);
+      showSuccess('Resubmission allowed! Student can now submit again.');
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      showError('Failed to allow resubmission', error.response?.data?.message || 'Please try again.');
+    } finally {
+      setAllowingResubmission(null);
+    }
+  };
 
   const getScoreColor = (score) => {
     if (score >= 80) return '#a6e3a1';
@@ -106,7 +124,7 @@ function StudentRow({ student, activities, onViewActivity }) {
         {/* Student info */}
         <div className="flex-1 min-w-0">
           <p className="font-medium text-[#cdd6f4] truncate">
-            {student.student.firstName} {student.student.lastName}
+            {student.student.lastName}, {student.student.firstName}{student.student.middleName ? ` ${student.student.middleName.charAt(0)}.` : ''}
           </p>
           <p className="text-xs text-[#6c7086]">{student.student.studentId}</p>
         </div>
@@ -158,7 +176,7 @@ function StudentRow({ student, activities, onViewActivity }) {
             {student.activities.map((activity) => (
               <div
                 key={activity.activityId}
-                className="flex items-center gap-4 p-2 bg-[#313244] rounded-lg text-sm"
+                className="flex items-center gap-3 p-2 bg-[#313244] rounded-lg text-sm"
               >
                 <div className="flex-1 min-w-0">
                   <p className="text-[#cdd6f4] truncate">{activity.activityTitle}</p>
@@ -176,6 +194,22 @@ function StudentRow({ student, activities, onViewActivity }) {
                 <span className="text-[#cba6f7] w-12 text-right">
                   {activity.hintsUsed} hints
                 </span>
+                {/* Allow Resubmission button - only show for passed activities */}
+                {activity.status === 'passed' && (
+                  <button
+                    onClick={(e) => handleAllowResubmission(activity.activityId, e)}
+                    disabled={allowingResubmission === activity.activityId}
+                    className="flex items-center gap-1 px-2 py-1 bg-[#fab387]/20 hover:bg-[#fab387]/30 text-[#fab387] rounded text-xs transition disabled:opacity-50"
+                    title="Allow student to resubmit this activity"
+                  >
+                    {allowingResubmission === activity.activityId ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-3 h-3" />
+                    )}
+                    Resubmit
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -427,6 +461,8 @@ function StudentProgressPanel({ sessionId, onActivitySelect }) {
                 key={student.student._id}
                 student={student}
                 activities={activities}
+                sessionId={sessionId}
+                onRefresh={fetchProgress}
               />
             ))
           )}

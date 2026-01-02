@@ -75,12 +75,17 @@ export const activityAPI = {
   getOne: (id) => api.get(`/activities/${id}`),
   create: (data) => api.post('/activities', data),
   update: (id, data) => api.put(`/activities/${id}`, data),
-  delete: (id) => api.delete(`/activities/${id}`)
+  delete: (id) => api.delete(`/activities/${id}`),
+  // Draft code persistence
+  saveDraft: (id, code, language) => api.post(`/activities/${id}/draft`, { code, language }),
+  loadDraft: (id) => api.get(`/activities/${id}/draft`),
+  clearDraft: (id) => api.delete(`/activities/${id}/draft`)
 };
 
 // Submission API calls
 export const submissionAPI = {
   submit: (data) => api.post('/submissions', data),
+  run: (data) => api.post('/submissions/run', data), // Run tests without creating submission
   getMySubmissions: (activityId) => api.get(`/submissions/activity/${activityId}`),
   getAll: () => api.get('/submissions/my'),
   getOne: (id) => api.get(`/submissions/${id}`),
@@ -98,11 +103,18 @@ export const labSessionAPI = {
   delete: (id) => api.delete(`/lab-sessions/${id}`),
   activate: (id) => api.put(`/lab-sessions/${id}/activate`),
   deactivate: (id) => api.put(`/lab-sessions/${id}/deactivate`),
+  markComplete: (id) => api.put(`/lab-sessions/${id}/complete`),
+  reopen: (id) => api.put(`/lab-sessions/${id}/reopen`),
+  extend: (id, extendedEndTime) => api.put(`/lab-sessions/${id}/extend`, { extendedEndTime }),
 
   // Student management
   addStudents: (id, studentIds) => api.post(`/lab-sessions/${id}/students`, { studentIds }),
   removeStudent: (id, studentId) => api.delete(`/lab-sessions/${id}/students/${studentId}`),
   getAvailableStudents: (id, filters) => api.get(`/lab-sessions/${id}/available-students`, { params: filters }),
+
+  // Resubmission control
+  allowResubmission: (sessionId, studentId, activityId) =>
+    api.put(`/lab-sessions/${sessionId}/resubmit/${studentId}/${activityId}`),
 
   // Activities within session
   createActivity: (id, data) => api.post(`/lab-sessions/${id}/activities`, data),
@@ -117,7 +129,8 @@ export const labSessionAPI = {
 export const studentAPI = {
   search: (params) => api.get('/students/search', { params }),
   getAll: (params) => api.get('/students', { params }),
-  getOne: (id) => api.get(`/students/${id}`)
+  getOne: (id) => api.get(`/students/${id}`),
+  getMyProfile: () => api.get('/students/me/profile')
 };
 
 // Analytics API calls (instructors only)
@@ -161,6 +174,64 @@ export const aiAPI = {
 
   // Get usage stats (instructors only)
   getUsageStats: (params) => api.get('/ai/usage', { params })
+};
+
+// Digital Twin API calls
+export const twinAPI = {
+  // Get complete Digital Twin profile
+  getProfile: () => api.get('/twin/profile'),
+
+  // Get AI dependency analysis
+  getAIDependency: () => api.get('/twin/ai-dependency'),
+
+  // Get personalized recommendations
+  getRecommendations: () => api.get('/twin/recommendations'),
+
+  // Get coding behavior analysis
+  getCodingBehavior: (activityId) =>
+    api.get('/twin/behavior', { params: activityId ? { activityId } : {} }),
+
+  // Get Shadow Twin personality
+  getShadowPersonality: () => api.get('/twin/shadow-personality'),
+
+  // Get competency summary
+  getCompetencies: () => api.get('/twin/competencies'),
+
+  // Get velocity history for charts
+  getVelocityHistory: () => api.get('/twin/velocity-history'),
+
+  // Check if should encourage independence
+  checkEncourageIndependence: (activityId) =>
+    api.post('/twin/encourage-independence', { activityId }),
+
+  // Adjust hint level based on profile
+  adjustHintLevel: (requestedLevel, activityId) =>
+    api.post('/twin/adjust-hint-level', { requestedLevel, activityId }),
+
+  // Get post-hint feedback
+  getHintFeedback: (hintLevel, wasHelpful) =>
+    api.post('/twin/hint-feedback', { hintLevel, wasHelpful }),
+
+  // Instructor: Get specific student's twin
+  getStudentTwin: (studentId) => api.get(`/twin/student/${studentId}`),
+
+  // Instructor: Get class analytics
+  getClassAnalytics: (sessionId) => api.get(`/twin/class-analytics/${sessionId}`)
+};
+
+// Activity Monitoring API calls
+export const monitoringAPI = {
+  // Student endpoints
+  start: (activityId, labSessionId) => api.post('/monitoring/start', { activityId, labSessionId }),
+  recordEvent: (monitoringId, event) => api.post('/monitoring/event', { monitoringId, event }),
+  recordEvents: (monitoringId, events) => api.post('/monitoring/events', { monitoringId, events }),
+  end: (monitoringId, totalActiveTime) => api.post('/monitoring/end', { monitoringId, totalActiveTime }),
+  getMyMonitoring: (activityId) => api.get(`/monitoring/my/${activityId}`),
+
+  // Instructor endpoints
+  getSessionMonitoring: (sessionId) => api.get(`/monitoring/session/${sessionId}`),
+  getStudentActivityMonitoring: (studentId, activityId) => api.get(`/monitoring/student/${studentId}/activity/${activityId}`),
+  getFlaggedStudents: (sessionId) => api.get(`/monitoring/flagged/${sessionId}`)
 };
 
 export default api;

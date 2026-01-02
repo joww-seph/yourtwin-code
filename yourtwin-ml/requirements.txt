@@ -1,0 +1,48 @@
+# MindSpore ML Service Dependencies
+# YourTwin Digital Twin Platform
+# Python 3.11 required
+
+# ============ Core ML Framework ============
+# MindSpore - Install separately using:
+# pip install mindspore==2.7.1 -i https://repo.mindspore.cn/pypi/simple --trusted-host repo.mindspore.cn --extra-index-url https://repo.huaweicloud.com/repository/pypi/simple
+mindspore==2.7.1
+
+# ============ Data Processing ============
+numpy>=1.26.0,<2.0.0
+pandas>=2.0.0
+scikit-learn>=1.0.0
+scipy>=1.7.0
+pillow>=10.0.0
+
+# ============ API Framework ============
+flask>=3.0.0
+flask-cors>=4.0.0
+gunicorn>=21.0.0
+waitress>=3.0.0
+
+# ============ Database ============
+pymongo>=4.0.0
+redis>=5.0.0
+
+# ============ Configuration ============
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# ============ HTTP & Networking ============
+requests>=2.31.0
+
+# ============ Logging & Monitoring ============
+loguru>=0.7.0
+
+# ============ Serialization ============
+protobuf>=4.0.0
+safetensors>=0.4.0
+
+# ============ Testing ============
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.0.0
+
+# ============ Development ============
+black>=24.0.0
+flake8>=7.0.0

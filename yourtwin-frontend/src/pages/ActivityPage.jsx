@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { activityAPI, submissionAPI } from '../services/api';
@@ -19,28 +19,47 @@ import { ShadowTwinProvider, useShadowTwin } from '../contexts/ShadowTwinContext
 import ShadowTwinButton from '../components/ShadowTwinButton';
 import HintPanel from '../components/HintPanel';
 
-// Main wrapper component - fetches activity data
+// Activity Monitoring imports
+import useActivityMonitoring from '../hooks/useActivityMonitoring';
+import ActivityMonitoringIndicator from '../components/ActivityMonitoringIndicator';
+
+// Main wrapper component - fetches activity data and checks if student passed
 function ActivityPage() {
   const { activityId } = useParams();
   const navigate = useNavigate();
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [labSessionId, setLabSessionId] = useState(null);
+  const [initialHasPassed, setInitialHasPassed] = useState(false);
 
   useEffect(() => {
-    fetchActivity();
+    fetchActivityAndCheckPassed();
   }, [activityId]);
 
-  const fetchActivity = async () => {
+  const fetchActivityAndCheckPassed = async () => {
     try {
-      const response = await activityAPI.getOne(activityId);
-      setActivity(response.data.data);
-      if (response.data.data.labSession) {
-        const sessionId = typeof response.data.data.labSession === 'object'
-          ? response.data.data.labSession._id
-          : response.data.data.labSession;
+      // Fetch activity and check if passed in parallel
+      const [activityRes, submissionsRes] = await Promise.all([
+        activityAPI.getOne(activityId),
+        submissionAPI.getMySubmissions(activityId).catch(() => ({ data: { data: [] } }))
+      ]);
+
+      setActivity(activityRes.data.data);
+
+      if (activityRes.data.data.labSession) {
+        const sessionId = typeof activityRes.data.data.labSession === 'object'
+          ? activityRes.data.data.labSession._id
+          : activityRes.data.data.labSession;
         setLabSessionId(sessionId);
       }
+
+      // Check if student has already passed (but NOT if resubmission was required)
+      const submissions = submissionsRes.data.data || [];
+      // hasPassed is true only if there's a 'passed' submission and no 'resubmission_required' status
+      const hasPassedSubmission = submissions.some(sub => sub.status === 'passed');
+      const resubmissionRequired = submissions.some(sub => sub.status === 'resubmission_required');
+      const hasPassed = hasPassedSubmission && !resubmissionRequired;
+      setInitialHasPassed(hasPassed);
     } catch (error) {
       console.error('Failed to fetch activity:', error);
     } finally {
@@ -95,38 +114,184 @@ function ActivityPage() {
       activityId={activityId}
       aiAssistanceLevel={activity.aiAssistanceLevel ?? 5}
     >
-      <ActivityPageContent activity={activity} labSessionId={labSessionId} />
+      <ActivityPageContent activity={activity} labSessionId={labSessionId} initialHasPassed={initialHasPassed} />
     </ShadowTwinProvider>
   );
 }
 
+// Helper to get localStorage key for activity code
+const getCodeStorageKey = (activityId, userId) => `yourtwin_code_${activityId}_${userId}`;
+
 // Inner component with Shadow Twin integration
-function ActivityPageContent({ activity, labSessionId }) {
+function ActivityPageContent({ activity, labSessionId, initialHasPassed = false }) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
   const [isRunning, setIsRunning] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasPassed, setHasPassed] = useState(initialHasPassed);
   const [results, setResults] = useState(null);
   const [activeTab, setActiveTab] = useState('problem');
   const [viewingSubmission, setViewingSubmission] = useState(null);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+
+  // Load saved code from localStorage or use starter code (initial fallback)
+  const getLocalSavedCode = useCallback(() => {
+    if (!user?._id || !activity?._id) return activity?.starterCode || '';
+    const key = getCodeStorageKey(activity._id, user._id);
+    const saved = localStorage.getItem(key);
+    return saved !== null ? saved : (activity?.starterCode || '');
+  }, [user?._id, activity?._id, activity?.starterCode]);
 
   // Track current code and error for Shadow Twin
-  const [currentCode, setCurrentCode] = useState(activity?.starterCode || '');
+  const [currentCode, setCurrentCode] = useState(() => getLocalSavedCode());
   const [lastError, setLastError] = useState('');
+  const currentCodeRef = useRef(currentCode);
+
+  // Keep ref in sync with current code (for cleanup/unmount)
+  useEffect(() => {
+    currentCodeRef.current = currentCode;
+  }, [currentCode]);
+
+  // Load draft from server on mount
+  useEffect(() => {
+    const loadServerDraft = async () => {
+      if (!activity?._id) return;
+      try {
+        const response = await activityAPI.loadDraft(activity._id);
+        if (response.data.success && response.data.data?.code) {
+          // Server draft exists - use it (more recent than localStorage)
+          setCurrentCode(response.data.data.code);
+          // Also sync to localStorage
+          const key = getCodeStorageKey(activity._id, user?._id);
+          localStorage.setItem(key, response.data.data.code);
+        }
+      } catch (error) {
+        // Silent fail - fall back to localStorage which is already loaded
+        console.log('No server draft found, using local storage');
+      } finally {
+        setDraftLoaded(true);
+      }
+    };
+    loadServerDraft();
+  }, [activity?._id, user?._id]);
+
+  // Save code to localStorage whenever it changes
+  const saveCodeToStorage = useCallback((code) => {
+    if (!user?._id || !activity?._id) return;
+    const key = getCodeStorageKey(activity._id, user._id);
+    localStorage.setItem(key, code);
+  }, [user?._id, activity?._id]);
+
+  // Save draft to server
+  const saveDraftToServer = useCallback(async (code) => {
+    if (!activity?._id || code === undefined) return;
+    try {
+      await activityAPI.saveDraft(activity._id, code, activity.language);
+    } catch (error) {
+      console.log('Failed to save draft to server:', error.message);
+    }
+  }, [activity?._id, activity?.language]);
+
+  // Debounced server save (every 10 seconds of inactivity)
+  const debouncedServerSaveRef = useRef(null);
+  const scheduleServerSave = useCallback((code) => {
+    if (debouncedServerSaveRef.current) {
+      clearTimeout(debouncedServerSaveRef.current);
+    }
+    debouncedServerSaveRef.current = setTimeout(() => {
+      saveDraftToServer(code);
+    }, 10000); // Save to server after 10 seconds of no changes
+  }, [saveDraftToServer]);
+
+  // Save to server when leaving the page
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Save current code to server on page unload
+      if (activity?._id && currentCodeRef.current) {
+        saveDraftToServer(currentCodeRef.current);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      // Save on unmount
+      if (activity?._id && currentCodeRef.current) {
+        saveDraftToServer(currentCodeRef.current);
+      }
+      if (debouncedServerSaveRef.current) {
+        clearTimeout(debouncedServerSaveRef.current);
+      }
+    };
+  }, [activity?._id, saveDraftToServer]);
+
+  // Reset code to starter code and clear storage
+  const handleResetCode = useCallback(async () => {
+    if (!user?._id || !activity?._id) return;
+    const key = getCodeStorageKey(activity._id, user._id);
+    localStorage.removeItem(key);
+    setCurrentCode(activity?.starterCode || '');
+    // Also clear server draft
+    try {
+      await activityAPI.clearDraft(activity._id);
+    } catch (error) {
+      console.log('Failed to clear server draft:', error.message);
+    }
+  }, [user?._id, activity?._id, activity?.starterCode]);
 
   // Time tracking for Shadow Twin
   const startTimeRef = useRef(Date.now());
+  const [elapsedTime, setElapsedTime] = useState(0);
   const { updateTimeSpent, fetchHintHistory, fetchRecommendedLevel } = useShadowTwin();
 
-  // Update time spent periodically
+  // Activity Monitoring - disabled if student already passed
+  const {
+    isMonitoring,
+    stats: monitoringStats,
+    handlePaste,
+    handleBlockedPaste,
+    handleCodeChange,
+    endMonitoring
+  } = useActivityMonitoring(activity._id, labSessionId, !initialHasPassed);
+
+  // End monitoring when leaving the page
   useEffect(() => {
-    const interval = setInterval(() => {
+    return () => {
+      endMonitoring();
+    };
+  }, [endMonitoring]);
+
+  // Update time spent periodically and track elapsed time
+  useEffect(() => {
+    // Update display every second
+    const displayInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      setElapsedTime(elapsed);
+    }, 1000);
+
+    // Update Shadow Twin less frequently
+    const syncInterval = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
       updateTimeSpent(elapsed);
     }, 30000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(displayInterval);
+      clearInterval(syncInterval);
+    };
   }, [updateTimeSpent]);
+
+  // Format elapsed time as mm:ss or hh:mm:ss
+  const formatElapsedTime = (seconds) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Fetch hint data on mount
   useEffect(() => {
@@ -134,9 +299,69 @@ function ActivityPageContent({ activity, labSessionId }) {
     fetchRecommendedLevel(0);
   }, [fetchHintHistory, fetchRecommendedLevel]);
 
+  // Check if student has already passed this activity
+  useEffect(() => {
+    const checkIfPassed = async () => {
+      try {
+        const response = await submissionAPI.getMySubmissions(activity._id);
+        const submissions = response.data.data || [];
+        const passed = submissions.some(sub => sub.status === 'passed');
+        setHasPassed(passed);
+      } catch (error) {
+        console.log('Could not check submission status');
+      }
+    };
+    if (activity?._id) {
+      checkIfPassed();
+    }
+  }, [activity?._id]);
+
+  // Run code - just runs test cases, no submission created
   const handleRunCode = async (code) => {
     setCurrentCode(code);
     setIsRunning(true);
+    setResults(null);
+    setActiveTab('results');
+
+    try {
+      const response = await submissionAPI.run({
+        activityId: activity._id,
+        code: code,
+        language: activity.language
+      });
+
+      setResults(response.data.data);
+
+      // Track error for Shadow Twin hints
+      const result = response.data.data;
+      if (result.compileError) {
+        setLastError(result.compileError);
+      } else if (result.runtimeError) {
+        setLastError(result.runtimeError);
+      } else if (result.status === 'failed') {
+        const failedTest = result.testExecutionLog?.find(t => !t.passed);
+        setLastError(failedTest ? `Test failed: Expected "${failedTest.expected}" but got "${failedTest.actual}"` : 'Test cases failed');
+      } else {
+        setLastError('');
+      }
+    } catch (error) {
+      console.error('Run code error:', error);
+      setResults({
+        error: true,
+        message: error.response?.data?.message || 'Failed to run code'
+      });
+      setLastError(error.response?.data?.message || 'Failed to run code');
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  // Submit code - creates a final submission with AI validation
+  const handleSubmitCode = async (code) => {
+    if (hasPassed) return; // Don't allow resubmission if already passed
+
+    setCurrentCode(code);
+    setIsSubmitting(true);
     setResults(null);
     setActiveTab('results');
 
@@ -163,6 +388,13 @@ function ActivityPageContent({ activity, labSessionId }) {
         setLastError('');
       }
 
+      // Update hasPassed if submission was successful
+      if (result.status === 'passed') {
+        setHasPassed(true);
+        // End monitoring since student passed
+        endMonitoring();
+      }
+
       // Update recommended level based on new attempt
       fetchRecommendedLevel(1);
     } catch (error) {
@@ -173,7 +405,7 @@ function ActivityPageContent({ activity, labSessionId }) {
       });
       setLastError(error.response?.data?.message || 'Submission failed');
     } finally {
-      setIsRunning(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -226,11 +458,25 @@ function ActivityPageContent({ activity, labSessionId }) {
               </div>
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-sm text-[#bac2de]">{getDisplayName(user)}</p>
-            <p className="text-xs text-[#6c7086]">
-              {user?.course} {user?.yearLevel}-{user?.section}
-            </p>
+          <div className="flex items-center gap-4">
+            {/* Time Spent Tracker */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-[#1e1e2e] rounded-lg border border-[#45475a]">
+              <Clock className="w-4 h-4 text-[#89b4fa]" />
+              <span className="text-sm font-mono text-[#cdd6f4]">{formatElapsedTime(elapsedTime)}</span>
+            </div>
+            {/* Activity Monitoring Indicator */}
+            <ActivityMonitoringIndicator
+              isMonitoring={isMonitoring}
+              stats={monitoringStats}
+              showDetails={true}
+              variant="compact"
+            />
+            <div className="text-right">
+              <p className="text-sm text-[#bac2de]">{getDisplayName(user)}</p>
+              <p className="text-xs text-[#6c7086]">
+                {user?.course} {user?.yearLevel}-{user?.section}
+              </p>
+            </div>
           </div>
         </div>
       </header>
@@ -296,10 +542,27 @@ function ActivityPageContent({ activity, labSessionId }) {
         {/* Right Panel - Code Editor */}
         <div className="w-1/2 flex flex-col">
           <CodeEditor
-            initialCode={activity.starterCode}
+            initialCode={currentCode}
+            starterCode={activity.starterCode}
             language={activity.language}
             onRun={handleRunCode}
+            onSubmit={handleSubmitCode}
             isRunning={isRunning}
+            isSubmitting={isSubmitting}
+            hasPassed={hasPassed}
+            onPaste={handlePaste}
+            lockdownMode={activity.aiAssistanceLevel === 0}
+            onExternalPasteBlocked={(pastedText) => {
+              // Log blocked paste attempt for instructor visibility
+              handleBlockedPaste(pastedText);
+            }}
+            onCodeChange={(code) => {
+              setCurrentCode(code);
+              saveCodeToStorage(code);
+              scheduleServerSave(code); // Schedule server save (debounced)
+              handleCodeChange(code.split('\n').length, code.length);
+            }}
+            onReset={handleResetCode}
           />
         </div>
       </div>
